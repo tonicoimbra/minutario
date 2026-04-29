@@ -550,6 +550,158 @@
     return template.content;
   }
 
+  function getDocumentView(doc) {
+    return doc && doc.defaultView ? doc.defaultView : global;
+  }
+
+  function createPasteData(doc, html, plainText) {
+    var view = getDocumentView(doc);
+    var DataTransferCtor = view.DataTransfer || global.DataTransfer;
+
+    if (typeof DataTransferCtor !== "function") {
+      return null;
+    }
+
+    try {
+      var data = new DataTransferCtor();
+      data.setData("text/html", html || "");
+      data.setData("text/plain", plainText || stripHtml(html));
+      return data;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function createPasteEvent(doc, pasteData) {
+    var view = getDocumentView(doc);
+    var ClipboardEventCtor = view.ClipboardEvent || global.ClipboardEvent;
+    var EventCtor = view.Event || global.Event;
+    var event = null;
+
+    if (typeof ClipboardEventCtor === "function") {
+      try {
+        event = new ClipboardEventCtor("paste", {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: pasteData,
+        });
+      } catch (error) {
+        event = null;
+      }
+    }
+
+    if (!event && typeof EventCtor === "function") {
+      event = new EventCtor("paste", { bubbles: true, cancelable: true });
+    }
+
+    if (!event) {
+      return null;
+    }
+
+    try {
+      if (!event.clipboardData) {
+        Object.defineProperty(event, "clipboardData", {
+          configurable: true,
+          value: pasteData,
+        });
+      }
+    } catch (error) {
+      return null;
+    }
+
+    return event;
+  }
+
+  async function writeRichClipboard(doc, html, plainText) {
+    var view = getDocumentView(doc);
+    var navigatorRef = view.navigator || global.navigator;
+    var ClipboardItemCtor = view.ClipboardItem || global.ClipboardItem;
+    var BlobCtor = view.Blob || global.Blob;
+
+    if (
+      !navigatorRef ||
+      !navigatorRef.clipboard ||
+      typeof navigatorRef.clipboard.write !== "function" ||
+      typeof ClipboardItemCtor !== "function" ||
+      typeof BlobCtor !== "function"
+    ) {
+      return false;
+    }
+
+    try {
+      await navigatorRef.clipboard.write([
+        new ClipboardItemCtor({
+          "text/html": new BlobCtor([html || ""], { type: "text/html" }),
+          "text/plain": new BlobCtor([plainText || stripHtml(html)], {
+            type: "text/plain",
+          }),
+        }),
+      ]);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function findPasteTarget(doc, range) {
+    if (range) {
+      var root = findEditableRoot(range.startContainer);
+      if (root) {
+        return root;
+      }
+    }
+
+    return doc.activeElement || doc.body || doc.documentElement;
+  }
+
+  function dispatchRichPaste(doc, range, html, plainText) {
+    var pasteData = createPasteData(doc, html, plainText);
+    var target = findPasteTarget(doc, range);
+
+    if (!pasteData || !target || typeof target.dispatchEvent !== "function") {
+      return false;
+    }
+
+    var event = createPasteEvent(doc, pasteData);
+    if (!event) {
+      return false;
+    }
+
+    var notCanceled = target.dispatchEvent(event);
+    return notCanceled === false || event.defaultPrevented === true;
+  }
+
+  function canUseRichPaste(doc, html) {
+    var view = getDocumentView(doc);
+    return Boolean(
+      html &&
+        typeof (view.DataTransfer || global.DataTransfer) === "function" &&
+        (typeof (view.ClipboardEvent || global.ClipboardEvent) === "function" ||
+          typeof (view.Event || global.Event) === "function")
+    );
+  }
+
+  async function pasteHtmlWithRange(doc, range, html, plainText) {
+    if (!doc || !range || !html) {
+      return false;
+    }
+
+    selectRange(doc, range);
+
+    var clipboardWritten = await writeRichClipboard(doc, html, plainText);
+    if (clipboardWritten && typeof doc.execCommand === "function") {
+      try {
+        if (doc.execCommand("paste", false, null)) {
+          return true;
+        }
+      } catch (error) {
+        // Fall back to a synthetic paste event and, if needed, direct insertion.
+      }
+    }
+
+    return dispatchRichPaste(doc, range, html, plainText);
+  }
+
   function insertHtmlWithRange(doc, range, html, plainText) {
     if (!doc || !range) {
       return false;
@@ -658,6 +810,43 @@
     return insertHtmlWithRange(doc, shortcutRange, normalizedHtml, replacementText);
   }
 
+  async function expandTemplateAtSelectionRich(doc, expectedText, html, plainText) {
+    if (!doc || !expectedText) {
+      return false;
+    }
+
+    var activeElement = doc.activeElement;
+    var normalizedHtml = normalizeTemplateHtml(doc, html);
+    var replacementText =
+      typeof plainText === "string" && plainText.length > 0
+        ? plainText
+        : stripHtml(normalizedHtml);
+
+    if (replaceShortcutInTextControl(activeElement, expectedText, replacementText)) {
+      return true;
+    }
+
+    var shortcutRange = createShortcutRange(doc, expectedText);
+    if (!shortcutRange) {
+      return false;
+    }
+
+    if (await pasteHtmlWithRange(doc, shortcutRange, normalizedHtml, replacementText)) {
+      return true;
+    }
+
+    return insertHtmlWithRange(doc, shortcutRange, normalizedHtml, replacementText);
+  }
+
+  function notifyTemplateUsed(template) {
+    if (chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
+      chrome.runtime.sendMessage({
+        type: "UPDATE_RECENT",
+        payload: { templateId: template.id },
+      });
+    }
+  }
+
   function handleCompletionKey(event, activeBuffer, doc) {
     var shortcut = activeBuffer.slice(1).toLowerCase();
 
@@ -672,8 +861,35 @@
     }
 
     var plainText = stripHtml(template.content);
+    var targetDoc = doc || global.document;
+
+    if (
+      canUseRichPaste(targetDoc, template.content) &&
+      !isTextControl(targetDoc.activeElement)
+    ) {
+      if (!createShortcutRange(targetDoc, activeBuffer)) {
+        return false;
+      }
+
+      event.preventDefault();
+      expandTemplateAtSelectionRich(
+        targetDoc,
+        activeBuffer,
+        template.content,
+        plainText
+      ).then(function (expanded) {
+        if (expanded) {
+          notifyTemplateUsed(template);
+        }
+      }).catch(function (error) {
+        console.error("Minutário failed to expand rich template:", error);
+      });
+
+      return true;
+    }
+
     var expanded = expandTemplateAtSelection(
-      doc || global.document,
+      targetDoc,
       activeBuffer,
       template.content,
       plainText
@@ -684,21 +900,17 @@
     }
 
     event.preventDefault();
-
-    if (chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
-      chrome.runtime.sendMessage({
-        type: "UPDATE_RECENT",
-        payload: { templateId: template.id },
-      });
-    }
+    notifyTemplateUsed(template);
 
     return true;
   }
 
   var api = {
     expandTemplateAtSelection: expandTemplateAtSelection,
+    expandTemplateAtSelectionRich: expandTemplateAtSelectionRich,
     createShortcutRange: createShortcutRange,
     insertHtmlWithRange: insertHtmlWithRange,
+    pasteHtmlWithRange: pasteHtmlWithRange,
     findEditableRoot: findEditableRoot,
     normalizeTemplateHtml: normalizeTemplateHtml,
     handleCompletionKey: handleCompletionKey,

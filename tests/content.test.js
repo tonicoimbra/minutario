@@ -79,6 +79,95 @@ test("expands shortcut by replacing typed text with formatted HTML", () => {
   assert.doesNotMatch(editor.textContent, /\/contrato/);
 });
 
+test("uses rich clipboard paste data before falling back to DOM insertion", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  const clipboardWrites = [];
+  let pastedHtml = "";
+  let pastedText = "";
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+
+    setData(type, value) {
+      this.data[type] = value;
+    }
+
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+  window.ClipboardItem = FakeClipboardItem;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: async (items) => {
+        clipboardWrites.push(items);
+      },
+    },
+  });
+
+  editor.addEventListener("paste", (event) => {
+    event.preventDefault();
+    pastedHtml = event.clipboardData.getData("text/html");
+    pastedText = event.clipboardData.getData("text/plain");
+
+    const selection = window.getSelection();
+    const range = selection.getRangeAt(0);
+    const template = window.document.createElement("template");
+    template.innerHTML = pastedHtml;
+
+    range.deleteContents();
+    range.insertNode(template.content);
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  assert.equal(
+    typeof window.MacroBlazeContent.expandTemplateAtSelectionRich,
+    "function"
+  );
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/contrato",
+    "<div>Contrato <strong>pronto</strong> com <em>itálico</em></div>",
+    "Contrato pronto com itálico"
+  );
+
+  assert.equal(expanded, true);
+  assert.equal(clipboardWrites.length, 1);
+  assert.equal(
+    pastedHtml,
+    "<p>Contrato <strong>pronto</strong> com <em>itálico</em></p>"
+  );
+  assert.equal(pastedText, "Contrato pronto com itálico");
+  assert.match(editor.innerHTML, /<strong>pronto<\/strong>/);
+  assert.match(editor.innerHTML, /<em>itálico<\/em>/);
+  assert.doesNotMatch(editor.textContent, /\/contrato/);
+});
+
 test("handles completion key synchronously when template is cached", () => {
   const dom = bootstrapDom(
     '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
