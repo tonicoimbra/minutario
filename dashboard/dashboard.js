@@ -94,6 +94,9 @@ function bindEvents() {
   els.deleteTemplateBtn.addEventListener('click', async () => {
     await deleteTemplate();
   });
+
+  document.getElementById('import-csv').addEventListener('change', handleCsvImport);
+  document.getElementById('export-csv').addEventListener('click', handleCsvExport);
 }
 
 async function loadStateFromStorage() {
@@ -439,6 +442,95 @@ async function deleteTemplate() {
   renderTemplateList();
   clearEditor();
   showToast('Template excluído.', false);
+}
+
+async function handleCsvImport(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+
+  var text = await file.text();
+  var parsed = CsvSync.parseCsv(text);
+
+  if (!parsed.success) {
+    showToast('Erro no CSV: ' + parsed.errors.join(', '), true);
+    return;
+  }
+
+  var result = CsvSync.importCsv(parsed.data, state.templates, state.folders);
+
+  if (result.conflicts.length > 0) {
+    var names = result.conflicts.map(function (c) { return '/' + c.shortcut; }).join(', ');
+    var confirmed = window.confirm(
+      'Conflitos detectados nos atalhos: ' + names + '\n\nDeseja sobrescrever os templates existentes?'
+    );
+    if (!confirmed) {
+      showToast('Importação cancelada.', true);
+      return;
+    }
+  }
+
+  var now = Date.now();
+  var updates = {};
+
+  result.templates.forEach(function (item) {
+    var existingId = null;
+    Object.values(state.templates).forEach(function (tpl) {
+      if (tpl.shortcut === item.shortcut) {
+        existingId = tpl.id;
+      }
+    });
+
+    var id = existingId || generateUUID();
+    var tpl = {
+      id: id,
+      name: item.name,
+      shortcut: item.shortcut,
+      content: item.content,
+      folderId: item.folderId,
+      createdAt: existingId ? state.templates[existingId].createdAt : now,
+      updatedAt: now,
+    };
+
+    updates[TEMPLATE_PREFIX + id] = tpl;
+    state.templates[id] = tpl;
+  });
+
+  await chrome.storage.sync.set(updates);
+  renderTemplateList();
+  showToast('Importados ' + result.stats.created + ' templates.', false);
+  event.target.value = '';
+}
+
+async function handleCsvExport() {
+  var rows = Object.values(state.templates).map(function (tpl) {
+    var folderName = '';
+    if (tpl.folderId) {
+      var folder = state.folders.find(function (f) { return f.id === tpl.folderId; });
+      folderName = folder ? folder.name : '';
+    }
+    return {
+      name: tpl.name,
+      shortcut: tpl.shortcut,
+      folder: folderName,
+      content: tpl.content,
+    };
+  });
+
+  var csv = Papa.unparse(rows, {
+    columns: ['name', 'shortcut', 'folder', 'content'],
+  });
+
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'minutario-templates.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  showToast('CSV exportado com sucesso.', false);
 }
 
 function showToast(message, isError) {
