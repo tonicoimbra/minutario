@@ -45,6 +45,7 @@ function cacheElements() {
   els.shortcutError = document.getElementById('shortcut-error');
   els.tplFolder = document.getElementById('tpl-folder');
   els.newFolderBtn = document.getElementById('new-folder');
+  els.deleteFolderBtn = document.getElementById('delete-folder');
   els.newTemplateBtn = document.getElementById('new-template');
   els.editorForm = document.getElementById('editor-form');
   els.deleteTemplateBtn = document.getElementById('delete-template');
@@ -70,6 +71,7 @@ function bindEvents() {
   });
 
   els.newFolderBtn.addEventListener('click', createFolder);
+  els.deleteFolderBtn.addEventListener('click', deleteActiveFolder);
 
   els.newTemplateBtn.addEventListener('click', () => {
     state.activeTemplateId = null;
@@ -125,11 +127,13 @@ function renderFolders() {
 
   els.folderList.innerHTML = '';
   els.folderList.appendChild(fragment);
+  updateFolderActions();
 }
 
 function buildFolderItem(folder) {
   const li = document.createElement('li');
   li.className = 'folder-item';
+  li.dataset.folderId = folder.id || '';
   li.textContent = folder.name;
 
   const isActive = (state.activeFolderId || null) === (folder.id || null);
@@ -191,6 +195,53 @@ async function createFolder() {
   renderFolderOptions();
   renderFolders();
   showToast('Pasta criada com sucesso.', false);
+}
+
+async function deleteActiveFolder() {
+  if (!state.activeFolderId) {
+    showToast('Selecione uma pasta para excluir.', true);
+    return;
+  }
+
+  const folder = state.folders.find((item) => item.id === state.activeFolderId);
+  if (!folder) {
+    showToast('Pasta não encontrada.', true);
+    return;
+  }
+
+  const confirmed = window.confirm(`Excluir pasta "${folder.name}"? Os templates serão movidos para Todos.`);
+  if (!confirmed) return;
+
+  const folderId = state.activeFolderId;
+  const updates = {
+    [FOLDERS_KEY]: state.folders.filter((item) => item.id !== folderId)
+  };
+
+  Object.values(state.templates).forEach((template) => {
+    if (template.folderId === folderId) {
+      const updatedTemplate = { ...template, folderId: null, updatedAt: Date.now() };
+      updates[`${TEMPLATE_PREFIX}${template.id}`] = updatedTemplate;
+      state.templates[template.id] = updatedTemplate;
+    }
+  });
+
+  state.folders = updates[FOLDERS_KEY];
+  state.activeFolderId = null;
+
+  await chrome.storage.sync.set(updates);
+
+  renderFolderOptions();
+  renderFolders();
+  renderTemplateList();
+  showToast('Pasta excluída. Templates movidos para Todos.', false);
+}
+
+function updateFolderActions() {
+  if (!els.deleteFolderBtn) {
+    return;
+  }
+
+  els.deleteFolderBtn.disabled = !state.activeFolderId;
 }
 
 function renderTemplateList() {

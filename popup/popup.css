@@ -10,6 +10,7 @@
   --slate-200: #e2e8f0;
   --slate-500: #64748b;
   --slate-700: #334155;
+  --slate-800: #1e293b;
   --text: #0f172a;
   --surface: #ffffff;
   --shadow-lg: 0 18px 45px rgba(13, 27, 42, 0.2);
@@ -52,7 +53,7 @@ body {
   border: 1px solid rgba(212, 175, 55, 0.48);
   border-radius: 14px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
-  color: var(--tjpr-gold);
+  color: #f5d66d;
   font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.04em;
@@ -60,7 +61,7 @@ body {
 
 .eyebrow {
   margin: 0 0 3px;
-  color: var(--tjpr-navy-500);
+  color: #d7e2ee;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -71,14 +72,14 @@ h1 {
   margin: 0;
   color: #ffffff;
   font-size: 21px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  font-weight: 700;
+  letter-spacing: -0.025em;
   line-height: 1.1;
 }
 
 .subtitle {
   margin: 5px 0 0;
-  color: rgba(248, 250, 252, 0.76);
+  color: rgba(248, 250, 252, 0.86);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -130,7 +131,7 @@ h1 {
 
 .recentes h2 {
   margin: 0 0 9px;
-  color: var(--slate-500);
+  color: var(--slate-700);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
@@ -167,7 +168,7 @@ h1 {
 
 .recent-name {
   display: block;
-  color: var(--slate-700);
+  color: var(--slate-800);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.25;
@@ -187,7 +188,7 @@ h1 {
   border: 1px dashed var(--slate-200);
   border-radius: 10px;
   background: var(--slate-50);
-  color: var(--slate-500);
+  color: var(--slate-700);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -199,7 +200,7 @@ footer {
   margin-top: 10px;
   padding: 0 2px;
   text-align: center;
-  color: rgba(248, 250, 252, 0.66);
+  color: rgba(248, 250, 252, 0.78);
   font-size: 9px;
   font-weight: 600;
   line-height: 1.35;

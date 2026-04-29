@@ -12,12 +12,16 @@
   --tjpr-gray-900: #212529;
   --tjpr-success: #2e7d32;
   --tjpr-error: #c62828;
+  --tjpr-error-deep: #8f1d1d;
   --surface: #ffffff;
   --surface-soft: #f8fafc;
-  --line: rgba(65, 90, 119, 0.16);
+  --text-strong: #142033;
+  --text-body: #334155;
+  --text-muted: #64748b;
+  --line: rgba(65, 90, 119, 0.18);
   --shadow-sm: 0 1px 2px rgba(13, 27, 42, 0.06);
-  --shadow-md: 0 4px 12px rgba(13, 27, 42, 0.1);
-  --shadow-lg: 0 18px 36px rgba(13, 27, 42, 0.14);
+  --shadow-md: 0 8px 22px rgba(13, 27, 42, 0.09);
+  --shadow-lg: 0 18px 40px rgba(13, 27, 42, 0.16);
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
@@ -39,7 +43,7 @@ body {
   display: flex;
   flex-direction: column;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: var(--tjpr-gray-900);
+  color: var(--text-body);
   background:
     radial-gradient(circle at top left, rgba(212, 175, 55, 0.12), transparent 32rem),
     linear-gradient(180deg, #f1f5f9 0%, #e9eef4 100%);
@@ -57,7 +61,7 @@ select {
   position: relative;
   z-index: 2;
   min-height: 76px;
-  padding: 14px 22px;
+  padding: 13px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -105,26 +109,26 @@ select {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 14px;
   background: linear-gradient(145deg, rgba(212, 175, 55, 0.95), rgba(212, 175, 55, 0.68));
   color: var(--tjpr-navy-900);
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 800;
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
 }
 
 .brand-title {
   margin: 0;
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1.05;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .brand-subtitle {
   margin: 4px 0 0;
-  color: var(--tjpr-navy-500);
+  color: #d7e2ee;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -132,9 +136,9 @@ select {
 
 .developer-credit {
   margin: 3px 0 0;
-  color: rgba(255, 255, 255, 0.62);
+  color: rgba(255, 255, 255, 0.74);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .dashboard-grid {
@@ -142,8 +146,8 @@ select {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(180px, 220px) minmax(230px, 280px) minmax(420px, 1fr);
-  gap: 16px;
-  padding: 16px;
+  gap: 18px;
+  padding: 18px;
   overflow: hidden;
 }
 
@@ -153,7 +157,7 @@ select {
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.95);
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(12px);
 }
@@ -166,9 +170,9 @@ select {
   margin-bottom: 12px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
-  color: var(--tjpr-navy-700);
+  color: var(--text-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.12em;
 }
 
@@ -185,9 +189,9 @@ select {
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
-  color: var(--tjpr-navy-800);
+  color: var(--text-body);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 600;
   transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
@@ -287,9 +291,9 @@ select {
 }
 
 .template-name {
-  color: var(--tjpr-navy-900);
+  color: var(--text-strong);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -303,12 +307,12 @@ select {
   background: #eef3f8;
   color: var(--tjpr-navy-700);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .template-preview {
   margin-top: 8px;
-  color: var(--tjpr-gray-600);
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -320,9 +324,9 @@ select {
 }
 
 .editor-form label {
-  color: var(--tjpr-navy-800);
+  color: var(--text-body);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .shortcut-wrap {
@@ -338,7 +342,7 @@ select {
 .shortcut-prefix {
   color: var(--tjpr-gold);
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 #tpl-shortcut {
@@ -355,7 +359,7 @@ select {
   min-height: 18px;
   color: var(--tjpr-error);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 #quill-editor {
@@ -398,9 +402,9 @@ select {
   gap: 8px;
   border: 0;
   border-radius: var(--radius-md);
-  padding: 10px 14px;
+  padding: 10px 15px;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   cursor: pointer;
   transition: background-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease, transform 0.18s ease;
@@ -426,7 +430,6 @@ select {
 
 .btn-secondary {
   width: 100%;
-  margin-top: 14px;
   border: 1px solid rgba(65, 90, 119, 0.18);
   background: #fff;
   color: var(--tjpr-navy-800);
@@ -438,8 +441,34 @@ select {
 }
 
 .btn-danger {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: var(--tjpr-error-deep);
+}
+
+.btn-danger:hover {
   background: #fee2e2;
-  color: var(--tjpr-error);
+  color: #7f1d1d;
+}
+
+.btn:disabled,
+.btn:disabled:hover {
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  opacity: 0.48;
+}
+
+.folder-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.btn-folder-delete {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
 }
 
 #toast {
