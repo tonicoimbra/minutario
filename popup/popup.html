@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Minutário</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <header class="popup-hero">
+      <div class="brand-mark" aria-hidden="true">M</div>
+      <div>
+        <p class="eyebrow">Biblioteca de minutas</p>
+        <h1>Minutário</h1>
+        <p class="subtitle">Minutas rápidas para Word Online</p>
+      </div>
+    </header>
+
+    <main class="popup-card">
+      <button id="open-dashboard" type="button">Abrir painel</button>
+
+      <section class="recentes" aria-labelledby="recentes-label">
+        <h2 id="recentes-label">Recentes</h2>
+        <div id="recent-list"></div>
+      </section>
+    </main>
+
+    <footer>
+      <span>v1.0.0</span>
+      <span>Desenvolvido por Elvertoni Coimbra</span>
+    </footer>
+
+    <script src="./popup.js"></script>
+  </body>
+</html>

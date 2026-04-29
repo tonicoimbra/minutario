@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Minutário",
+  "version": "1.0.0",
+  "description": "Expanda atalhos de texto em modelos HTML ricos no Word Online.",
+  "author": "Elvertoni Coimbra",
+  "permissions": ["storage", "clipboardWrite", "clipboardRead"],
+  "host_permissions": [
+    "https://word.live.com/*",
+    "https://*.officeapps.live.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Minutário"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://word.live.com/*",
+        "https://*.officeapps.live.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dashboard/dashboard.html",
+        "dashboard/dashboard.js",
+        "dashboard/dashboard.css"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

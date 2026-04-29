@@ -1,0 +1,9 @@
+node_modules/
+.superpowers/
+.codex
+/patches/
+refs/
+
+.DS_Store
+*.log
+npm-debug.log*

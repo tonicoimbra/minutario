@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minutário Dashboard</title>
+  <link rel="stylesheet" href="../lib/quill.snow.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header class="top-bar">
+    <div class="brand-wrap">
+      <div class="brand-mark" aria-hidden="true">M</div>
+      <div>
+        <h1 class="brand-title">Minutário</h1>
+        <p class="brand-subtitle">Modelos rápidos para Word Online</p>
+        <p class="developer-credit">Desenvolvido por Elvertoni Coimbra</p>
+      </div>
+    </div>
+    <button id="new-template" class="btn btn-primary" type="button">+ Novo Template</button>
+  </header>
+
+  <main class="dashboard-grid">
+    <aside class="panel panel-folders">
+      <div class="panel-head">PASTAS</div>
+      <ul id="folder-list" class="folder-list"></ul>
+      <button id="new-folder" class="btn btn-secondary" type="button">+ Nova Pasta</button>
+    </aside>
+
+    <section class="panel panel-list">
+      <div class="search-wrap">
+        <input id="search" type="search" placeholder="Buscar por nome ou atalho..." autocomplete="off">
+      </div>
+      <ul id="template-list" class="template-list"></ul>
+    </section>
+
+    <section class="panel panel-editor">
+      <form id="editor-form" class="editor-form">
+        <label for="tpl-name">Nome</label>
+        <input id="tpl-name" type="text" maxlength="120" required>
+
+        <label for="tpl-shortcut">Atalho</label>
+        <div class="shortcut-wrap">
+          <span class="shortcut-prefix">/</span>
+          <input id="tpl-shortcut" type="text" maxlength="30" placeholder="ex: contrato" autocomplete="off" required>
+        </div>
+        <span id="shortcut-error" class="shortcut-error" aria-live="polite"></span>
+
+        <label for="tpl-folder">Pasta</label>
+        <select id="tpl-folder"></select>
+
+        <label for="quill-editor">Conteúdo</label>
+        <div id="quill-editor"></div>
+
+        <div class="editor-actions">
+          <button id="save-template" class="btn btn-primary" type="submit">Salvar</button>
+          <button id="delete-template" class="btn btn-danger" type="button">Excluir</button>
+        </div>
+      </form>
+      <div id="toast" aria-live="polite" aria-atomic="true"></div>
+    </section>
+  </main>
+
+  <script src="../lib/quill.min.js"></script>
+  <script src="dashboard.js" defer></script>
+</body>
+</html>

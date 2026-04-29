@@ -1,0 +1,272 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const { JSDOM } = require("jsdom");
+
+const scriptPath = path.join(__dirname, "..", "content.js");
+const scriptSource = fs.readFileSync(scriptPath, "utf8");
+
+function bootstrapDom(html) {
+  const dom = new JSDOM(html, {
+    runScripts: "outside-only",
+    pretendToBeVisual: true,
+  });
+
+  const { window } = dom;
+
+  window.chrome = {
+    storage: {
+      sync: {
+        get: async () => ({}),
+      },
+      onChanged: {
+        addListener() {},
+      },
+    },
+    runtime: {
+      sendMessage() {},
+    },
+  };
+
+  window.eval(scriptSource);
+  return dom;
+}
+
+function placeCaretAtEnd(window, element) {
+  const selection = window.getSelection();
+  const range = window.document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function getSelectionSnapshot(window) {
+  const selection = window.getSelection();
+  return {
+    text: selection.toString(),
+    rangeCount: selection.rangeCount,
+    anchorNodeText:
+      selection.anchorNode && selection.anchorNode.nodeType === 3
+        ? selection.anchorNode.nodeValue
+        : selection.anchorNode && selection.anchorNode.textContent,
+    anchorOffset: selection.anchorOffset,
+    isCollapsed: selection.isCollapsed,
+  };
+}
+
+test("expands shortcut by replacing typed text with formatted HTML", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+
+  placeCaretAtEnd(window, editor);
+
+  assert.ok(window.MacroBlazeContent, "MacroBlazeContent API should be exposed");
+
+  const expanded = window.MacroBlazeContent.expandTemplateAtSelection(
+    window.document,
+    "/contrato",
+    "<strong>Contrato pronto</strong>",
+    "Contrato pronto"
+  );
+
+  assert.equal(expanded, true);
+  assert.match(editor.innerHTML, /<strong>Contrato pronto<\/strong>/);
+  assert.doesNotMatch(editor.textContent, /\/contrato/);
+});
+
+test("handles completion key synchronously when template is cached", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+
+  placeCaretAtEnd(window, editor);
+
+  assert.ok(
+    typeof window.MacroBlazeContent.handleCompletionKey === "function",
+    "handleCompletionKey API should be exposed"
+  );
+
+  window.MacroBlazeContent.setTemplateCache({
+    contrato: {
+      id: "tpl-1",
+      shortcut: "contrato",
+      content: "<strong>Contrato pronto</strong>",
+    },
+  });
+
+  let prevented = false;
+  const event = {
+    key: " ",
+    code: "Space",
+    preventDefault() {
+      prevented = true;
+    },
+  };
+
+  const handled = window.MacroBlazeContent.handleCompletionKey(
+    event,
+    "/contrato",
+    window.document
+  );
+
+  assert.equal(handled, true);
+  assert.equal(prevented, true);
+  assert.match(editor.innerHTML, /<strong>Contrato pronto<\/strong>/);
+});
+
+test("normalizes Quill-flavored HTML into a word-friendly subset", () => {
+  const dom = bootstrapDom("<!doctype html><html><body></body></html>");
+  const { window } = dom;
+
+  assert.ok(
+    typeof window.MacroBlazeContent.normalizeTemplateHtml === "function",
+    "normalizeTemplateHtml API should be exposed"
+  );
+
+  const normalized = window.MacroBlazeContent.normalizeTemplateHtml(
+    window.document,
+    [
+      '<div class="ql-align-center">',
+      '<span class="ql-size-large">Primeira <strong>linha</strong></span>',
+      "</div>",
+      '<div data-x="1">Segunda <em>linha</em><br><u>final</u></div>',
+      '<ul class="ql-list"><li><span style="color:red">item</span></li></ul>',
+    ].join("")
+  );
+
+  assert.equal(
+    normalized,
+    "<p>Primeira <strong>linha</strong></p><p>Segunda <em>linha</em><br><u>final</u></p><ul><li>item</li></ul>"
+  );
+});
+
+test("uses browser edit commands to delete shortcut before inserting HTML", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  const commands = [];
+
+  window.document.execCommand = (command, showUi, value) => {
+    commands.push({ command, showUi, value, selectedText: window.getSelection().toString() });
+
+    const selection = window.getSelection();
+    const range = selection.getRangeAt(0);
+
+    if (command === "delete") {
+      range.deleteContents();
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+
+    if (command === "insertHTML") {
+      const template = window.document.createElement("template");
+      template.innerHTML = value;
+      const insertedNodes = Array.from(template.content.childNodes);
+
+      range.insertNode(template.content);
+
+      const caretRange = window.document.createRange();
+      const lastNode = insertedNodes[insertedNodes.length - 1];
+      caretRange.selectNodeContents(lastNode);
+      caretRange.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(caretRange);
+
+      return true;
+    }
+
+    return false;
+  };
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = window.MacroBlazeContent.expandTemplateAtSelection(
+    window.document,
+    "/contrato",
+    "<strong>Contrato pronto</strong>",
+    "Contrato pronto"
+  );
+
+  assert.equal(expanded, true);
+  assert.deepEqual(commands, [
+    {
+      command: "delete",
+      showUi: false,
+      value: null,
+      selectedText: "/contrato",
+    },
+    {
+      command: "insertHTML",
+      showUi: false,
+      value: "<strong>Contrato pronto</strong>",
+      selectedText: "",
+    },
+  ]);
+  assert.equal(editor.innerHTML, "<strong>Contrato pronto</strong>");
+});
+
+test("places caret at the exact end of inserted block content", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = window.MacroBlazeContent.expandTemplateAtSelection(
+    window.document,
+    "/contrato",
+    "<div>Primeira <strong>linha</strong></div><div>Segunda linha</div>",
+    "Primeira linha\nSegunda linha"
+  );
+
+  assert.equal(expanded, true);
+  assert.equal(
+    editor.innerHTML,
+    "<p>Primeira <strong>linha</strong></p><p>Segunda linha</p>"
+  );
+
+  const selection = getSelectionSnapshot(window);
+  assert.equal(selection.isCollapsed, true);
+  assert.equal(selection.text, "");
+  assert.equal(selection.anchorNodeText, "Segunda linha");
+  assert.equal(selection.anchorOffset, "Segunda linha".length);
+});
+
+test("places caret after trailing empty block content", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = window.MacroBlazeContent.expandTemplateAtSelection(
+    window.document,
+    "/contrato",
+    "<div>Primeira linha</div><div><br></div>",
+    "Primeira linha\n"
+  );
+
+  assert.equal(expanded, true);
+  assert.equal(editor.innerHTML, "<p>Primeira linha</p><p><br></p>");
+
+  const selection = window.getSelection();
+  const trailingBlock = editor.lastChild;
+  assert.equal(selection.isCollapsed, true);
+  assert.equal(selection.anchorNode, trailingBlock);
+  assert.equal(selection.anchorOffset, trailingBlock.childNodes.length);
+});
