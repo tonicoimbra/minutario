@@ -99,6 +99,9 @@ function bindEvents() {
   document.getElementById('export-csv').addEventListener('click', handleCsvExport);
   document.getElementById('drive-backup').addEventListener('click', handleDriveBackup);
   document.getElementById('drive-restore').addEventListener('click', handleDriveRestore);
+  document.getElementById('supabase-sync').addEventListener('click', handleSupabaseSyncClick);
+  document.getElementById('sb-login').addEventListener('click', handleSupabaseLogin);
+  document.getElementById('sb-close').addEventListener('click', hideSupabaseModal);
 }
 
 async function loadStateFromStorage() {
@@ -566,6 +569,82 @@ async function handleDriveRestore() {
     showToast('Templates restaurados do Google Drive.', false);
   } catch (error) {
     showToast('Erro na restauração: ' + error.message, true);
+  }
+}
+
+function showSupabaseModal() {
+  document.getElementById('supabase-modal').classList.remove('hidden');
+}
+
+function hideSupabaseModal() {
+  document.getElementById('supabase-modal').classList.add('hidden');
+}
+
+async function handleSupabaseSyncClick() {
+  var init = await SupabaseSync.init();
+  if (!init.success) {
+    showSupabaseModal();
+    return;
+  }
+  await performSupabaseSync();
+}
+
+async function handleSupabaseLogin() {
+  var email = document.getElementById('sb-email').value.trim();
+  var password = document.getElementById('sb-password').value;
+  var result = await SupabaseSync.signIn(email, password);
+  if (result.success) {
+    hideSupabaseModal();
+    await performSupabaseSync();
+  } else {
+    showToast('Erro de login: ' + result.error, true);
+  }
+}
+
+async function performSupabaseSync() {
+  try {
+    var all = await chrome.storage.sync.get(null);
+    var templates = {};
+    var folders = [];
+    Object.entries(all).forEach(function (_ref) {
+      var key = _ref[0];
+      var value = _ref[1];
+      if (key.startsWith('tpl_')) templates[value.id] = value;
+      if (key === 'folders') folders = value;
+    });
+
+    await SupabaseSync.push(templates, folders);
+
+    var pulled = await SupabaseSync.pull();
+    if (!pulled.success) {
+      showToast(pulled.error, true);
+      return;
+    }
+
+    var updates = {};
+    pulled.templates.forEach(function (t) {
+      var local = state.templates[t.id];
+      if (!local || t.updatedAt > local.updatedAt) {
+        updates['tpl_' + t.id] = t;
+        state.templates[t.id] = t;
+      }
+    });
+
+    if (pulled.folders && pulled.folders.length > 0) {
+      updates.folders = pulled.folders;
+      state.folders = pulled.folders;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await chrome.storage.sync.set(updates);
+      renderFolders();
+      renderFolderOptions();
+      renderTemplateList();
+    }
+
+    showToast('Sincronizado com Supabase.', false);
+  } catch (error) {
+    showToast('Erro no sync: ' + error.message, true);
   }
 }
 
