@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Goal
 
-**Minutário** — a Chrome extension (Manifest V3) developed by **Elvertoni Coimbra** for text expansion / macros in Word Online (office.com). Users type a shortcut like `/contrato` followed by Space and the extension replaces it with rich HTML content.
+**Minutário** — a Chrome extension (Manifest V3) developed by **Elvertoni Coimbra** for text expansion / macros anywhere in the browser. Users type a shortcut like `/contrato` followed by Space and the extension replaces it with rich HTML content in any text field, textarea, or contenteditable element.
 
 ## Running Tests
 
@@ -26,7 +26,7 @@ node --check background.js content.js popup/popup.js dashboard/dashboard.js
 
 Required: `icons/icon16.png`, `icons/icon48.png`, `icons/icon128.png` must exist (referenced in `manifest.json`).
 
-The extension only injects into `https://word.live.com/*` and `https://*.officeapps.live.com/*`.
+The extension injects into all pages (`<all_urls>`) and works in any text input, textarea, or contenteditable field.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ The extension only injects into `https://word.live.com/*` and `https://*.officea
 |---|---|
 | `manifest.json` | MV3 manifest — permissions, host_permissions, content_scripts |
 | `background.js` | Service worker — message router + storage migration |
-| `content.js` | Injected into Word Online — keydown listener, template expansion |
+| `content.js` | Injected into all pages — keydown listener, template expansion |
 | `popup/popup.{html,js,css}` | Toolbar popup — opens dashboard, shows 3 recent templates |
 | `dashboard/dashboard.{html,js,css}` | Full-page CRUD UI — template management, folders, search |
 | `lib/quill.min.js` + `lib/quill.snow.css` | Quill 1.3.7 (bundled, no CDN) — rich-text editor in dashboard |

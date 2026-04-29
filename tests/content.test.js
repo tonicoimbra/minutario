@@ -306,47 +306,14 @@ test("normalizes Quill-flavored HTML into a word-friendly subset", () => {
   );
 });
 
-test("uses browser edit commands to delete shortcut before inserting HTML", () => {
+test("expands shortcut via direct DOM insertion when execCommand is unavailable", () => {
   const dom = bootstrapDom(
     '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
   );
   const { window } = dom;
   const editor = window.document.getElementById("editor");
-  const commands = [];
 
-  window.document.execCommand = (command, showUi, value) => {
-    commands.push({ command, showUi, value, selectedText: window.getSelection().toString() });
-
-    const selection = window.getSelection();
-    const range = selection.getRangeAt(0);
-
-    if (command === "delete") {
-      range.deleteContents();
-      range.collapse(true);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      return true;
-    }
-
-    if (command === "insertHTML") {
-      const template = window.document.createElement("template");
-      template.innerHTML = value;
-      const insertedNodes = Array.from(template.content.childNodes);
-
-      range.insertNode(template.content);
-
-      const caretRange = window.document.createRange();
-      const lastNode = insertedNodes[insertedNodes.length - 1];
-      caretRange.selectNodeContents(lastNode);
-      caretRange.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(caretRange);
-
-      return true;
-    }
-
-    return false;
-  };
+  window.document.execCommand = () => false;
 
   placeCaretAtEnd(window, editor);
 
@@ -358,21 +325,8 @@ test("uses browser edit commands to delete shortcut before inserting HTML", () =
   );
 
   assert.equal(expanded, true);
-  assert.deepEqual(commands, [
-    {
-      command: "delete",
-      showUi: false,
-      value: null,
-      selectedText: "/contrato",
-    },
-    {
-      command: "insertHTML",
-      showUi: false,
-      value: "<strong>Contrato pronto</strong>",
-      selectedText: "",
-    },
-  ]);
   assert.equal(editor.innerHTML, "<strong>Contrato pronto</strong>");
+  assert.doesNotMatch(editor.textContent, /\/contrato/);
 });
 
 test("places caret at the exact end of inserted block content", () => {
@@ -428,4 +382,122 @@ test("places caret after trailing empty block content", () => {
   assert.equal(selection.isCollapsed, true);
   assert.equal(selection.anchorNode, trailingBlock);
   assert.equal(selection.anchorOffset, trailingBlock.childNodes.length);
+});
+
+test("expands shortcut inside a text input with plain text output", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><input id="editor" type="text" value="/contrato"></body></html>'
+  );
+  const { window } = dom;
+  const input = window.document.getElementById("editor");
+
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+
+  window.MacroBlazeContent.setTemplateCache({
+    contrato: {
+      id: "tpl-1",
+      shortcut: "contrato",
+      content: "<strong>Contrato pronto</strong>",
+    },
+  });
+
+  let prevented = false;
+  const event = {
+    key: " ",
+    code: "Space",
+    preventDefault() {
+      prevented = true;
+    },
+  };
+
+  const handled = window.MacroBlazeContent.handleCompletionKey(
+    event,
+    "/contrato",
+    window.document
+  );
+
+  assert.equal(handled, true);
+  assert.equal(prevented, true);
+  assert.equal(input.value, "Contrato pronto");
+  assert.equal(input.selectionStart, "Contrato pronto".length);
+  assert.equal(input.selectionEnd, "Contrato pronto".length);
+});
+
+test("expands shortcut inside a textarea with plain text output", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><textarea id="editor">/contrato</textarea></body></html>'
+  );
+  const { window } = dom;
+  const textarea = window.document.getElementById("editor");
+
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+  window.MacroBlazeContent.setTemplateCache({
+    contrato: {
+      id: "tpl-1",
+      shortcut: "contrato",
+      content: "<strong>Contrato pronto</strong>",
+    },
+  });
+
+  let prevented = false;
+  const event = {
+    key: " ",
+    code: "Space",
+    preventDefault() {
+      prevented = true;
+    },
+  };
+
+  const handled = window.MacroBlazeContent.handleCompletionKey(
+    event,
+    "/contrato",
+    window.document
+  );
+
+  assert.equal(handled, true);
+  assert.equal(prevented, true);
+  assert.equal(textarea.value, "Contrato pronto");
+  assert.equal(textarea.selectionStart, "Contrato pronto".length);
+  assert.equal(textarea.selectionEnd, "Contrato pronto".length);
+});
+
+test("does not expand shortcut inside a password input", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><input id="editor" type="password" value="/contrato"></body></html>'
+  );
+  const { window } = dom;
+  const input = window.document.getElementById("editor");
+
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+
+  window.MacroBlazeContent.setTemplateCache({
+    contrato: {
+      id: "tpl-1",
+      shortcut: "contrato",
+      content: "<strong>Contrato pronto</strong>",
+    },
+  });
+
+  let prevented = false;
+  const event = {
+    key: " ",
+    code: "Space",
+    preventDefault() {
+      prevented = true;
+    },
+  };
+
+  const handled = window.MacroBlazeContent.handleCompletionKey(
+    event,
+    "/contrato",
+    window.document
+  );
+
+  assert.equal(handled, false);
+  assert.equal(prevented, false);
+  assert.equal(input.value, "/contrato");
 });

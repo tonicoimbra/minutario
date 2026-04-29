@@ -106,7 +106,7 @@
       return true;
     }
 
-    return tagName === "INPUT" && /^(text|search|url|tel|email|password)$/i.test(node.type || "");
+    return tagName === "INPUT" && /^(text|search|url|tel|email)$/i.test(node.type || "");
   }
 
   function isContentEditableElement(node) {
@@ -140,15 +140,17 @@
       current = current.parentNode;
     }
 
+    var lastEditable = null;
+
     while (current && current.nodeType) {
       if (isContentEditableElement(current)) {
-        return current;
+        lastEditable = current;
       }
 
       current = current.parentNode;
     }
 
-    return null;
+    return lastEditable;
   }
 
   function createTextWalker(doc, root) {
@@ -696,18 +698,6 @@
       return null;
     }
 
-    selectRange(doc, range);
-
-    if (typeof doc.execCommand === "function") {
-      try {
-        if (doc.execCommand("delete", false, null)) {
-          return getSelectedRange(doc) || range;
-        }
-      } catch (error) {
-        // Fall back to Range.deleteContents below.
-      }
-    }
-
     try {
       range.deleteContents();
       range.collapse(true);
@@ -731,46 +721,12 @@
     var clipboardWritten = await writeRichClipboard(doc, html, plainText);
     selectRange(doc, insertionRange);
 
-    if (clipboardWritten && typeof doc.execCommand === "function") {
-      try {
-        if (doc.execCommand("paste", false, null)) {
-          return true;
-        }
-      } catch (error) {
-        // Fall back to a synthetic paste event and, if needed, direct insertion.
-      }
-    }
-
     return dispatchRichPaste(doc, insertionRange, html, plainText);
   }
 
   function insertHtmlWithRange(doc, range, html, plainText) {
     if (!doc || !range) {
       return false;
-    }
-
-    var commandHtml = html || (plainText ? escapeHtml(plainText) : "");
-    if (commandHtml && typeof doc.execCommand === "function") {
-      selectRange(doc, range);
-
-      try {
-        if (doc.execCommand("delete", false, null)) {
-          try {
-            if (doc.execCommand("insertHTML", false, commandHtml)) {
-              return true;
-            }
-          } catch (insertError) {
-            // Fall back to direct DOM insertion below.
-          }
-
-          var selection = getSelection(doc);
-          if (selection && selection.rangeCount > 0) {
-            range = selection.getRangeAt(0);
-          }
-        }
-      } catch (error) {
-        // Fall back to direct DOM insertion when the browser edit command is unavailable.
-      }
     }
 
     range.deleteContents();
@@ -844,6 +800,10 @@
       return true;
     }
 
+    if (activeElement && (activeElement.tagName === "INPUT" || activeElement.tagName === "TEXTAREA")) {
+      return false;
+    }
+
     var shortcutRange = createShortcutRange(doc, expectedText);
     if (!shortcutRange) {
       return false;
@@ -866,6 +826,10 @@
 
     if (replaceShortcutInTextControl(activeElement, expectedText, replacementText)) {
       return true;
+    }
+
+    if (activeElement && (activeElement.tagName === "INPUT" || activeElement.tagName === "TEXTAREA")) {
+      return false;
     }
 
     var shortcutRange = createShortcutRange(doc, expectedText);
@@ -904,10 +868,19 @@
 
     var plainText = stripHtml(template.content);
     var targetDoc = doc || global.document;
+    var activeElement = targetDoc.activeElement;
+
+    if (
+      activeElement &&
+      (activeElement.tagName === "INPUT" || activeElement.tagName === "TEXTAREA") &&
+      !isTextControl(activeElement)
+    ) {
+      return false;
+    }
 
     if (
       canUseRichPaste(targetDoc, template.content) &&
-      !isTextControl(targetDoc.activeElement)
+      !isTextControl(activeElement)
     ) {
       if (!createShortcutRange(targetDoc, activeBuffer)) {
         return false;
