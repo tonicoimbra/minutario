@@ -97,6 +97,8 @@ function bindEvents() {
 
   document.getElementById('import-csv').addEventListener('change', handleCsvImport);
   document.getElementById('export-csv').addEventListener('click', handleCsvExport);
+  document.getElementById('drive-backup').addEventListener('click', handleDriveBackup);
+  document.getElementById('drive-restore').addEventListener('click', handleDriveRestore);
 }
 
 async function loadStateFromStorage() {
@@ -531,6 +533,40 @@ async function handleCsvExport() {
   URL.revokeObjectURL(url);
 
   showToast('CSV exportado com sucesso.', false);
+}
+
+async function handleDriveBackup() {
+  try {
+    var data = await chrome.storage.sync.get(null);
+    var result = await DriveSync.backup(data);
+    showToast('Backup salvo no Google Drive.', false);
+  } catch (error) {
+    showToast('Erro no backup: ' + error.message, true);
+  }
+}
+
+async function handleDriveRestore() {
+  try {
+    var confirmed = window.confirm('Restaurar do Drive? Isso substituirá todos os templates locais.');
+    if (!confirmed) return;
+
+    var result = await DriveSync.restore();
+    if (!result.success) {
+      showToast(result.error, true);
+      return;
+    }
+
+    await chrome.storage.sync.clear();
+    await chrome.storage.sync.set(result.data);
+    await loadStateFromStorage();
+    renderFolders();
+    renderFolderOptions();
+    renderTemplateList();
+    clearEditor();
+    showToast('Templates restaurados do Google Drive.', false);
+  } catch (error) {
+    showToast('Erro na restauração: ' + error.message, true);
+  }
 }
 
 function showToast(message, isError) {

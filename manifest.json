@@ -4,7 +4,13 @@
   "version": "1.0.0",
   "description": "Expanda atalhos de texto em modelos HTML ricos em qualquer página do navegador.",
   "author": "Elvertoni Coimbra",
-  "permissions": ["storage", "clipboardWrite", "clipboardRead"],
+  "permissions": ["storage", "clipboardWrite", "clipboardRead", "identity"],
+  "oauth2": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.file"
+    ]
+  },
   "host_permissions": [
     "<all_urls>"
   ],
