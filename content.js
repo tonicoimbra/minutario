@@ -681,14 +681,56 @@
     );
   }
 
+  function getSelectedRange(doc) {
+    var selection = getSelection(doc);
+
+    if (!selection || selection.rangeCount === 0) {
+      return null;
+    }
+
+    return selection.getRangeAt(0);
+  }
+
+  function deleteRangeForInsertion(doc, range) {
+    if (!doc || !range) {
+      return null;
+    }
+
+    selectRange(doc, range);
+
+    if (typeof doc.execCommand === "function") {
+      try {
+        if (doc.execCommand("delete", false, null)) {
+          return getSelectedRange(doc) || range;
+        }
+      } catch (error) {
+        // Fall back to Range.deleteContents below.
+      }
+    }
+
+    try {
+      range.deleteContents();
+      range.collapse(true);
+      selectRange(doc, range);
+      return range;
+    } catch (error) {
+      return null;
+    }
+  }
+
   async function pasteHtmlWithRange(doc, range, html, plainText) {
     if (!doc || !range || !html) {
       return false;
     }
 
-    selectRange(doc, range);
+    var insertionRange = deleteRangeForInsertion(doc, range);
+    if (!insertionRange) {
+      return false;
+    }
 
     var clipboardWritten = await writeRichClipboard(doc, html, plainText);
+    selectRange(doc, insertionRange);
+
     if (clipboardWritten && typeof doc.execCommand === "function") {
       try {
         if (doc.execCommand("paste", false, null)) {
@@ -699,7 +741,7 @@
       }
     }
 
-    return dispatchRichPaste(doc, range, html, plainText);
+    return dispatchRichPaste(doc, insertionRange, html, plainText);
   }
 
   function insertHtmlWithRange(doc, range, html, plainText) {

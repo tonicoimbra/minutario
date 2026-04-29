@@ -168,6 +168,76 @@ test("uses rich clipboard paste data before falling back to DOM insertion", asyn
   assert.doesNotMatch(editor.textContent, /\/contrato/);
 });
 
+test("deletes typed shortcut before rich paste insertion", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/caso01</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+
+    setData(type, value) {
+      this.data[type] = value;
+    }
+
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+  window.ClipboardItem = FakeClipboardItem;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: async () => {},
+    },
+  });
+
+  editor.addEventListener("paste", (event) => {
+    event.preventDefault();
+
+    const selection = window.getSelection();
+    const range = selection.getRangeAt(0);
+    const template = window.document.createElement("template");
+    template.innerHTML = event.clipboardData.getData("text/html");
+
+    range.insertNode(template.content);
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/caso01",
+    "<strong>Caso formatado</strong>",
+    "Caso formatado"
+  );
+
+  assert.equal(expanded, true);
+  assert.equal(editor.textContent, "Caso formatado");
+  assert.match(editor.innerHTML, /<strong>Caso formatado<\/strong>/);
+  assert.doesNotMatch(editor.textContent, /\/caso01/);
+});
+
 test("handles completion key synchronously when template is cached", () => {
   const dom = bootstrapDom(
     '<!doctype html><html><body><div id="editor" contenteditable="true">/contrato</div></body></html>'
