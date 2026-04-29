@@ -17,7 +17,7 @@ Tests use **jsdom** (no browser required). Each test bootstraps a real DOM, inje
 
 To syntax-check JS files without running them:
 ```bash
-node --check background.js content.js popup/popup.js dashboard/dashboard.js
+node --check background.js content.js popup/popup.js dashboard/dashboard.js dashboard/sync/*.js
 ```
 
 ## Loading in Chrome
@@ -40,6 +40,12 @@ The extension injects into all pages (`<all_urls>`) and works in any text input,
 | `popup/popup.{html,js,css}` | Toolbar popup — opens dashboard, shows 3 recent templates |
 | `dashboard/dashboard.{html,js,css}` | Full-page CRUD UI — template management, folders, search |
 | `lib/quill.min.js` + `lib/quill.snow.css` | Quill 1.3.7 (bundled, no CDN) — rich-text editor in dashboard |
+| `lib/papaparse.min.js` | PapaParse 5.4.1 (bundled) — CSV parser for import/export |
+| `lib/supabase.min.js` | Supabase JS client (bundled) — cloud sync |
+| `dashboard/sync/csv.js` | CSV parser + importer module |
+| `dashboard/sync/drive.js` | Google Drive OAuth + backup/restore |
+| `dashboard/sync/supabase.js` | Supabase auth + push/pull sync |
+| `dashboard/sync/index.js` | SyncManager facade — orchestrates all backends |
 | `icons/` | 16×16, 48×48, 128×128 PNGs |
 
 ### Storage layout (`chrome.storage.sync`)
@@ -58,6 +64,49 @@ All messages follow `{ type, payload }` → `{ ok, data?, error? }`.
 | `OPEN_DASHBOARD` | `{ focusExisting? }` | `{ ok: true }` |
 | `GET_TEMPLATES` | `{ folderId?, query? }` | `{ ok: true, data: Template[] }` |
 | `UPDATE_RECENT` | `{ templateId }` | `{ ok: true }` |
+
+### Sync Modules (dashboard)
+
+Three backends are available from the dashboard's import bar:
+
+**CSV Import/Export**
+- Format: `name,shortcut,folder,content` (columns are case-insensitive)
+- Import: validates required columns, detects shortcut conflicts, asks before overwriting
+- Export: downloads `minutario-templates.csv` with all templates + folder names
+
+**Google Drive**
+- Uses `chrome.identity` OAuth2 with `drive.file` scope
+- Backup: uploads `minutario-backup.json` to user's Drive
+- Restore: downloads and replaces local `chrome.storage.sync` state
+- Requires `oauth2.client_id` in `manifest.json` (replace placeholder before publishing)
+
+**Supabase**
+- Requires: Supabase project with `templates` and `folders` tables (see schema below)
+- Auth: email/password via Supabase Auth
+- Sync: bidirectional merge — pushes local state, then pulls remote, keeping the newest by `updatedAt`
+- Configure `SUPABASE_URL` and `SUPABASE_ANON_KEY` in `dashboard/sync/supabase.js`
+
+```sql
+-- Supabase schema
+create table templates (
+  id uuid primary key,
+  user_id uuid references auth.users not null,
+  name text not null,
+  shortcut text not null,
+  content text not null,
+  folder_id uuid,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique(user_id, shortcut)
+);
+
+create table folders (
+  id uuid primary key,
+  user_id uuid references auth.users not null,
+  name text not null,
+  order_idx int default 0
+);
+```
 
 ### Expansion flow (content.js)
 
