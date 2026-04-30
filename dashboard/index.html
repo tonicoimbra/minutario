@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2563eb">
+  <title>Minutário — Templates Jurídicos</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login Screen -->
+    <section id="login-screen" class="screen">
+      <div class="login-card">
+        <h1 class="login-title">Minutário</h1>
+        <p class="login-subtitle">Templates de texto para assessores</p>
+        <form id="login-form" class="login-form">
+          <input type="email" id="login-email" placeholder="Email" required autocomplete="email">
+          <input type="password" id="login-password" placeholder="Senha" required autocomplete="current-password">
+          <button type="submit" id="login-btn" class="btn btn-primary">Entrar</button>
+        </form>
+        <p id="login-error" class="login-error" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- Dashboard Screen -->
+    <section id="dashboard-screen" class="screen hidden">
+      <header class="dashboard-header">
+        <div class="header-brand">
+          <h1 class="header-title">Minutário</h1>
+          <span id="sync-badge" class="sync-badge sync-idle">Sincronizado</span>
+        </div>
+        <button type="button" id="logout-btn" class="btn btn-secondary btn-small">Sair</button>
+      </header>
+
+      <main class="dashboard-main">
+        <div class="search-wrap">
+          <input type="search" id="search-input" placeholder="🔍 Buscar templates... (Ctrl+1 a Ctrl+9 para copiar)" autocomplete="off">
+        </div>
+
+        <ul id="template-list" class="template-list"></ul>
+
+        <div id="empty-state" class="empty-state hidden">
+          <p>Nenhum template encontrado.</p>
+        </div>
+      </main>
+    </section>
+
+    <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
+  </div>
+
+  <script src="../lib/supabase.min.js"></script>
+  <script src="../shared/config.js"></script>
+  <script src="../shared/db.js"></script>
+  <script src="../shared/api.js"></script>
+  <script src="../shared/sync.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
