@@ -1,688 +1,453 @@
-const TEMPLATE_PREFIX = 'tpl_';
-const FOLDERS_KEY = 'folders';
-const SETTINGS_KEY = 'settings';
-const MAX_TEMPLATE_BYTES = 8192;
-const MAX_TOTAL_BYTES = 102400;
+(function() {
+  "use strict";
 
-const state = {
-  templates: {},
-  folders: [],
-  activeFolderId: null,
-  activeTemplateId: null,
-  quill: null,
-  settings: {
-    triggerChar: '/',
-    triggerKey: 'Space'
-  }
-};
+  // State
+  var allTemplates = [];
+  var filteredTemplates = [];
+  var debounceTimer = null;
+  var realtimeSubscription = null;
+  var orgId = null;
 
-const els = {};
+  // DOM cache
+  var els = {};
 
-document.addEventListener('DOMContentLoaded', async () => {
-  cacheElements();
-  initQuill();
-  bindEvents();
-
-  await loadStateFromStorage();
-  renderFolderOptions();
-  renderFolders();
-  renderTemplateList();
-
-  const initialTemplate = Object.values(state.templates)[0];
-  if (initialTemplate) {
-    selectTemplate(initialTemplate.id);
-  } else {
-    clearEditor();
-  }
-});
-
-function cacheElements() {
-  els.folderList = document.getElementById('folder-list');
-  els.templateList = document.getElementById('template-list');
-  els.search = document.getElementById('search');
-  els.tplName = document.getElementById('tpl-name');
-  els.tplShortcut = document.getElementById('tpl-shortcut');
-  els.shortcutError = document.getElementById('shortcut-error');
-  els.tplFolder = document.getElementById('tpl-folder');
-  els.newFolderBtn = document.getElementById('new-folder');
-  els.deleteFolderBtn = document.getElementById('delete-folder');
-  els.newTemplateBtn = document.getElementById('new-template');
-  els.editorForm = document.getElementById('editor-form');
-  els.deleteTemplateBtn = document.getElementById('delete-template');
-  els.toast = document.getElementById('toast');
-}
-
-function initQuill() {
-  state.quill = new Quill('#quill-editor', {
-    theme: 'snow',
-    modules: {
-      toolbar: [
-        ['bold', 'italic', 'underline'],
-        [{ header: 1 }, { header: 2 }],
-        [{ list: 'ordered' }, { list: 'bullet' }]
-      ]
-    }
-  });
-}
-
-function bindEvents() {
-  els.search.addEventListener('input', () => {
-    renderTemplateList();
-  });
-
-  els.newFolderBtn.addEventListener('click', createFolder);
-  els.deleteFolderBtn.addEventListener('click', deleteActiveFolder);
-
-  els.newTemplateBtn.addEventListener('click', () => {
-    state.activeTemplateId = null;
-    clearEditor();
-    renderTemplateList();
-  });
-
-  els.tplShortcut.addEventListener('input', () => {
-    const normalized = els.tplShortcut.value.trim().toLowerCase();
-    els.tplShortcut.value = normalized;
-    const error = getShortcutValidationMessage(normalized, true);
-    showShortcutError(error);
-  });
-
-  els.editorForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    await saveTemplate();
-  });
-
-  els.deleteTemplateBtn.addEventListener('click', async () => {
-    await deleteTemplate();
-  });
-
-  document.getElementById('import-csv').addEventListener('change', handleCsvImport);
-  document.getElementById('export-csv').addEventListener('click', handleCsvExport);
-  document.getElementById('drive-backup').addEventListener('click', handleDriveBackup);
-  document.getElementById('drive-restore').addEventListener('click', handleDriveRestore);
-  document.getElementById('supabase-sync').addEventListener('click', handleSupabaseSyncClick);
-  document.getElementById('sb-login').addEventListener('click', handleSupabaseLogin);
-  document.getElementById('sb-close').addEventListener('click', hideSupabaseModal);
-}
-
-async function loadStateFromStorage() {
-  const all = await chrome.storage.sync.get(null);
-  const templates = {};
-
-  Object.entries(all).forEach(([key, value]) => {
-    if (key.startsWith(TEMPLATE_PREFIX) && value && typeof value === 'object') {
-      const id = value.id || key.slice(TEMPLATE_PREFIX.length);
-      templates[id] = { ...value, id };
-    }
-  });
-
-  state.templates = templates;
-  state.folders = Array.isArray(all[FOLDERS_KEY]) ? all[FOLDERS_KEY] : [];
-  state.settings = {
-    ...state.settings,
-    ...(all[SETTINGS_KEY] || {})
-  };
-}
-
-function renderFolders() {
-  const fragment = document.createDocumentFragment();
-
-  fragment.appendChild(buildFolderItem({ id: null, name: 'Todos' }));
-
-  const sortedFolders = [...state.folders].sort((a, b) => (a.order || 0) - (b.order || 0));
-  sortedFolders.forEach((folder) => {
-    fragment.appendChild(buildFolderItem(folder));
-  });
-
-  els.folderList.innerHTML = '';
-  els.folderList.appendChild(fragment);
-  updateFolderActions();
-}
-
-function buildFolderItem(folder) {
-  const li = document.createElement('li');
-  li.className = 'folder-item';
-  li.dataset.folderId = folder.id || '';
-  li.textContent = folder.name;
-
-  const isActive = (state.activeFolderId || null) === (folder.id || null);
-  if (isActive) {
-    li.classList.add('active');
+  function cacheElements() {
+    els.loginScreen = document.getElementById("login-screen");
+    els.dashboardScreen = document.getElementById("dashboard-screen");
+    els.loginForm = document.getElementById("login-form");
+    els.loginEmail = document.getElementById("login-email");
+    els.loginPassword = document.getElementById("login-password");
+    els.loginError = document.getElementById("login-error");
+    els.logoutBtn = document.getElementById("logout-btn");
+    els.searchInput = document.getElementById("search-input");
+    els.templateList = document.getElementById("template-list");
+    els.emptyState = document.getElementById("empty-state");
+    els.syncBadge = document.getElementById("sync-badge");
+    els.toast = document.getElementById("toast");
   }
 
-  li.addEventListener('click', () => {
-    state.activeFolderId = folder.id || null;
-    renderFolders();
-    renderTemplateList();
-
-    const visibleIds = getFilteredTemplates().map((tpl) => tpl.id);
-    if (!visibleIds.includes(state.activeTemplateId)) {
-      state.activeTemplateId = null;
-      clearEditor();
-    }
-  });
-
-  return li;
-}
-
-function renderFolderOptions() {
-  const currentValue = state.activeTemplateId && state.templates[state.activeTemplateId]
-    ? state.templates[state.activeTemplateId].folderId || ''
-    : '';
-
-  const options = ['<option value="">Todos</option>'];
-  const sortedFolders = [...state.folders].sort((a, b) => (a.order || 0) - (b.order || 0));
-
-  sortedFolders.forEach((folder) => {
-    options.push(`<option value="${escapeHtmlAttr(folder.id)}">${escapeHtml(folder.name)}</option>`);
-  });
-
-  els.tplFolder.innerHTML = options.join('');
-  els.tplFolder.value = currentValue;
-}
-
-async function createFolder() {
-  const name = window.prompt('Nome da nova pasta:');
-  if (!name) return;
-
-  const trimmed = name.trim();
-  if (!trimmed) return;
-
-  const nextOrder = state.folders.reduce((max, folder) => {
-    return Math.max(max, Number(folder.order) || 0);
-  }, -1) + 1;
-
-  const folder = {
-    id: generateUUID(),
-    name: trimmed,
-    order: nextOrder
-  };
-
-  state.folders.push(folder);
-  await chrome.storage.sync.set({ [FOLDERS_KEY]: state.folders });
-
-  renderFolderOptions();
-  renderFolders();
-  showToast('Pasta criada com sucesso.', false);
-}
-
-async function deleteActiveFolder() {
-  if (!state.activeFolderId) {
-    showToast('Selecione uma pasta para excluir.', true);
-    return;
+  // Utilities
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
-  const folder = state.folders.find((item) => item.id === state.activeFolderId);
-  if (!folder) {
-    showToast('Pasta não encontrada.', true);
-    return;
+  function stripHtml(html) {
+    if (!html) return "";
+    var tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || "";
   }
 
-  const confirmed = window.confirm(`Excluir pasta "${folder.name}"? Os templates serão movidos para Todos.`);
-  if (!confirmed) return;
-
-  const folderId = state.activeFolderId;
-  const updates = {
-    [FOLDERS_KEY]: state.folders.filter((item) => item.id !== folderId)
-  };
-
-  Object.values(state.templates).forEach((template) => {
-    if (template.folderId === folderId) {
-      const updatedTemplate = { ...template, folderId: null, updatedAt: Date.now() };
-      updates[`${TEMPLATE_PREFIX}${template.id}`] = updatedTemplate;
-      state.templates[template.id] = updatedTemplate;
-    }
-  });
-
-  state.folders = updates[FOLDERS_KEY];
-  state.activeFolderId = null;
-
-  await chrome.storage.sync.set(updates);
-
-  renderFolderOptions();
-  renderFolders();
-  renderTemplateList();
-  showToast('Pasta excluída. Templates movidos para Todos.', false);
-}
-
-function updateFolderActions() {
-  if (!els.deleteFolderBtn) {
-    return;
+  function showToast(message) {
+    var item = document.createElement("div");
+    item.className = "toast-item";
+    item.textContent = message;
+    els.toast.appendChild(item);
+    window.setTimeout(function() {
+      item.remove();
+    }, 2500);
   }
 
-  els.deleteFolderBtn.disabled = !state.activeFolderId;
-}
-
-function renderTemplateList() {
-  const templates = getFilteredTemplates();
-  els.templateList.innerHTML = '';
-
-  if (!templates.length) {
-    const empty = document.createElement('li');
-    empty.className = 'template-item';
-    empty.textContent = 'Nenhum template encontrado.';
-    els.templateList.appendChild(empty);
-    return;
-  }
-
-  templates.forEach((template) => {
-    const item = document.createElement('li');
-    item.className = 'template-item';
-    if (state.activeTemplateId === template.id) {
-      item.classList.add('active');
-    }
-
-    const previewText = stripHtml(template.content || '').slice(0, 60);
-
-    item.innerHTML = [
-      `<div class="template-name">${escapeHtml(template.name || 'Sem nome')}</div>`,
-      `<div class="template-shortcut">/${escapeHtml(template.shortcut || '')}</div>`,
-      `<div class="template-preview">${escapeHtml(previewText)}</div>`
-    ].join('');
-
-    item.addEventListener('click', () => {
-      selectTemplate(template.id);
-    });
-
-    els.templateList.appendChild(item);
-  });
-}
-
-function getFilteredTemplates() {
-  const query = els.search.value.trim().toLowerCase();
-
-  return Object.values(state.templates)
-    .filter((template) => {
-      if (state.activeFolderId && template.folderId !== state.activeFolderId) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      const haystack = `${template.name || ''} ${template.shortcut || ''}`.toLowerCase();
-      return haystack.includes(query);
-    })
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-}
-
-function selectTemplate(id) {
-  const template = state.templates[id];
-  if (!template) return;
-
-  state.activeTemplateId = id;
-
-  els.tplName.value = template.name || '';
-  els.tplShortcut.value = template.shortcut || '';
-  renderFolderOptions();
-  els.tplFolder.value = template.folderId || '';
-  state.quill.root.innerHTML = template.content || '';
-
-  showShortcutError('');
-  renderTemplateList();
-}
-
-function clearEditor() {
-  els.tplName.value = '';
-  els.tplShortcut.value = '';
-  els.tplFolder.value = '';
-  state.quill.setText('');
-  showShortcutError('');
-}
-
-function getShortcutValidationMessage(shortcut, allowEmpty) {
-  if (!shortcut) {
-    return allowEmpty ? '' : 'Atalho é obrigatório.';
-  }
-  if (shortcut.length > 30) {
-    return 'O atalho deve ter no máximo 30 caracteres.';
-  }
-  if (!/^[a-z0-9-]+$/.test(shortcut)) {
-    return 'Use apenas letras minúsculas, números e hífen.';
-  }
-  return '';
-}
-
-function showShortcutError(message) {
-  els.shortcutError.textContent = message || '';
-}
-
-async function saveTemplate() {
-  const name = els.tplName.value.trim();
-  const shortcut = els.tplShortcut.value.trim().toLowerCase();
-  const folderId = els.tplFolder.value || null;
-
-  els.tplShortcut.value = shortcut;
-
-  if (!name) {
-    showToast('Nome do template é obrigatório.', true);
-    return;
-  }
-
-  const shortcutError = getShortcutValidationMessage(shortcut, false);
-  if (shortcutError) {
-    showShortcutError(shortcutError);
-    return;
-  }
-
-  const conflict = Object.values(state.templates).find((tpl) => {
-    return tpl.shortcut === shortcut && tpl.id !== state.activeTemplateId;
-  });
-
-  if (conflict) {
-    showShortcutError(`Atalho já em uso pelo template "${conflict.name}".`);
-    return;
-  }
-
-  showShortcutError('');
-
-  const now = Date.now();
-  const existing = state.activeTemplateId ? state.templates[state.activeTemplateId] : null;
-  const id = existing ? existing.id : generateUUID();
-
-  const candidate = {
-    id,
-    name,
-    shortcut,
-    content: state.quill.root.innerHTML,
-    folderId,
-    createdAt: existing ? existing.createdAt : now,
-    updatedAt: now
-  };
-
-  const candidateBytes = getBytesLength(JSON.stringify(candidate));
-  if (candidateBytes > MAX_TEMPLATE_BYTES) {
-    showToast(
-      `Template size: ${candidateBytes} / ${MAX_TEMPLATE_BYTES} bytes.\nDelete old templates or shorten content to save space.`,
-      true
-    );
-    return;
-  }
-
-  const allStorage = await chrome.storage.sync.get(null);
-  const currentTotalBytes = Object.entries(allStorage).reduce((total, [key, value]) => {
-    if (!key.startsWith(TEMPLATE_PREFIX) || !value || typeof value !== 'object') {
-      return total;
-    }
-    if (key === `${TEMPLATE_PREFIX}${id}`) {
-      return total;
-    }
-    return total + getBytesLength(JSON.stringify(value));
-  }, 0);
-
-  const projectedTotal = currentTotalBytes + candidateBytes;
-  if (projectedTotal > MAX_TOTAL_BYTES) {
-    showToast(
-      `Total sync size: ${projectedTotal} / ${MAX_TOTAL_BYTES} bytes.\nDelete old templates or shorten content to save space.`,
-      true
-    );
-    return;
-  }
-
-  await chrome.storage.sync.set({ [`${TEMPLATE_PREFIX}${id}`]: candidate });
-  state.templates[id] = candidate;
-  state.activeTemplateId = id;
-
-  renderTemplateList();
-  selectTemplate(id);
-  showToast('Template salvo com sucesso.', false);
-}
-
-async function deleteTemplate() {
-  if (!state.activeTemplateId) {
-    showToast('Selecione um template para excluir.', true);
-    return;
-  }
-
-  const template = state.templates[state.activeTemplateId];
-  const confirmed = window.confirm(`Excluir template "${template.name}"?`);
-  if (!confirmed) return;
-
-  const id = state.activeTemplateId;
-  await chrome.storage.sync.remove(`${TEMPLATE_PREFIX}${id}`);
-
-  delete state.templates[id];
-  state.activeTemplateId = null;
-
-  renderTemplateList();
-  clearEditor();
-  showToast('Template excluído.', false);
-}
-
-async function handleCsvImport(event) {
-  var file = event.target.files[0];
-  if (!file) return;
-
-  var text = await file.text();
-  var parsed = CsvSync.parseCsv(text);
-
-  if (!parsed.success) {
-    showToast('Erro no CSV: ' + parsed.errors.join(', '), true);
-    return;
-  }
-
-  var result = CsvSync.importCsv(parsed.data, state.templates, state.folders);
-
-  if (result.conflicts.length > 0) {
-    var names = result.conflicts.map(function (c) { return '/' + c.shortcut; }).join(', ');
-    var confirmed = window.confirm(
-      'Conflitos detectados nos atalhos: ' + names + '\n\nDeseja sobrescrever os templates existentes?'
-    );
-    if (!confirmed) {
-      showToast('Importação cancelada.', true);
-      return;
-    }
-  }
-
-  var now = Date.now();
-  var updates = {};
-
-  result.templates.forEach(function (item) {
-    var existingId = null;
-    Object.values(state.templates).forEach(function (tpl) {
-      if (tpl.shortcut === item.shortcut) {
-        existingId = tpl.id;
-      }
-    });
-
-    var id = existingId || generateUUID();
-    var tpl = {
-      id: id,
-      name: item.name,
-      shortcut: item.shortcut,
-      content: item.content,
-      folderId: item.folderId,
-      createdAt: existingId ? state.templates[existingId].createdAt : now,
-      updatedAt: now,
-    };
-
-    updates[TEMPLATE_PREFIX + id] = tpl;
-    state.templates[id] = tpl;
-  });
-
-  await chrome.storage.sync.set(updates);
-  renderTemplateList();
-  showToast('Importados ' + result.stats.created + ' templates.', false);
-  event.target.value = '';
-}
-
-async function handleCsvExport() {
-  var rows = Object.values(state.templates).map(function (tpl) {
-    var folderName = '';
-    if (tpl.folderId) {
-      var folder = state.folders.find(function (f) { return f.id === tpl.folderId; });
-      folderName = folder ? folder.name : '';
-    }
+  // Auth helpers
+  function getStoredTokens() {
     return {
-      name: tpl.name,
-      shortcut: tpl.shortcut,
-      folder: folderName,
-      content: tpl.content,
+      accessToken: localStorage.getItem("minutario_access_token"),
+      refreshToken: localStorage.getItem("minutario_refresh_token")
     };
-  });
-
-  var csv = Papa.unparse(rows, {
-    columns: ['name', 'shortcut', 'folder', 'content'],
-  });
-
-  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = 'minutario-templates.csv';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  showToast('CSV exportado com sucesso.', false);
-}
-
-async function handleDriveBackup() {
-  try {
-    var data = await chrome.storage.sync.get(null);
-    var result = await DriveSync.backup(data);
-    showToast('Backup salvo no Google Drive.', false);
-  } catch (error) {
-    showToast('Erro no backup: ' + error.message, true);
   }
-}
 
-async function handleDriveRestore() {
-  try {
-    var confirmed = window.confirm('Restaurar do Drive? Isso substituirá todos os templates locais.');
-    if (!confirmed) return;
+  function saveTokens(session) {
+    localStorage.setItem("minutario_access_token", session.access_token);
+    localStorage.setItem("minutario_refresh_token", session.refresh_token);
+  }
 
-    var result = await DriveSync.restore();
-    if (!result.success) {
-      showToast(result.error, true);
-      return;
+  function clearTokens() {
+    localStorage.removeItem("minutario_access_token");
+    localStorage.removeItem("minutario_refresh_token");
+    localStorage.removeItem("minutario_org_id");
+  }
+
+  // Screen management
+  function showLoginScreen() {
+    els.loginScreen.classList.remove("hidden");
+    els.dashboardScreen.classList.add("hidden");
+  }
+
+  function showDashboardScreen() {
+    els.loginScreen.classList.add("hidden");
+    els.dashboardScreen.classList.remove("hidden");
+  }
+
+  // Sync badge
+  function updateSyncBadge(state) {
+    var badge = els.syncBadge;
+    badge.className = "sync-badge";
+    if (state === "idle") {
+      badge.classList.add("sync-idle");
+      badge.textContent = "Sincronizado";
+    } else if (state === "syncing") {
+      badge.classList.add("sync-syncing");
+      badge.textContent = "Sincronizando...";
+    } else if (state === "updated") {
+      badge.classList.add("sync-updated");
+      badge.textContent = "Atualizado";
+    } else if (state === "error" || state === "offline") {
+      badge.classList.add("sync-error");
+      badge.textContent = "Erro";
     }
-
-    await chrome.storage.sync.clear();
-    await chrome.storage.sync.set(result.data);
-    await loadStateFromStorage();
-    renderFolders();
-    renderFolderOptions();
-    renderTemplateList();
-    clearEditor();
-    showToast('Templates restaurados do Google Drive.', false);
-  } catch (error) {
-    showToast('Erro na restauração: ' + error.message, true);
   }
-}
 
-function showSupabaseModal() {
-  document.getElementById('supabase-modal').classList.remove('hidden');
-}
+  // Login
+  async function handleLogin(event) {
+    event.preventDefault();
+    var email = els.loginEmail.value.trim();
+    var password = els.loginPassword.value;
 
-function hideSupabaseModal() {
-  document.getElementById('supabase-modal').classList.add('hidden');
-}
-
-async function handleSupabaseSyncClick() {
-  var init = await SupabaseSync.init();
-  if (!init.success) {
-    showSupabaseModal();
-    return;
-  }
-  await performSupabaseSync();
-}
-
-async function handleSupabaseLogin() {
-  var email = document.getElementById('sb-email').value.trim();
-  var password = document.getElementById('sb-password').value;
-  var result = await SupabaseSync.signIn(email, password);
-  if (result.success) {
-    hideSupabaseModal();
-    await performSupabaseSync();
-  } else {
-    showToast('Erro de login: ' + result.error, true);
-  }
-}
-
-async function performSupabaseSync() {
-  try {
-    var all = await chrome.storage.sync.get(null);
-    var templates = {};
-    var folders = [];
-    Object.entries(all).forEach(function (_ref) {
-      var key = _ref[0];
-      var value = _ref[1];
-      if (key.startsWith('tpl_')) templates[value.id] = value;
-      if (key === 'folders') folders = value;
-    });
-
-    await SupabaseSync.push(templates, folders);
-
-    var pulled = await SupabaseSync.pull();
-    if (!pulled.success) {
-      showToast(pulled.error, true);
-      return;
-    }
-
-    var updates = {};
-    pulled.templates.forEach(function (t) {
-      var local = state.templates[t.id];
-      if (!local || t.updatedAt > local.updatedAt) {
-        updates['tpl_' + t.id] = t;
-        state.templates[t.id] = t;
+    try {
+      var client = window.MinutarioAPI.getClient();
+      if (!client) {
+        throw new Error("Cliente Supabase não disponível");
       }
+
+      var result = await client.auth.signInWithPassword({ email: email, password: password });
+      if (result.error) {
+        throw result.error;
+      }
+
+      var session = result.data.session;
+      var user = result.data.user;
+
+      if (!session) {
+        throw new Error("Sessão não retornada");
+      }
+
+      saveTokens(session);
+
+      var userOrgId = user && user.user_metadata ? user.user_metadata.org_id : null;
+      if (userOrgId) {
+        orgId = userOrgId;
+        localStorage.setItem("minutario_org_id", orgId);
+      }
+
+      els.loginError.textContent = "";
+      await initDashboard();
+    } catch (err) {
+      els.loginError.textContent = err.message || "Erro ao fazer login";
+    }
+  }
+
+  // Logout
+  async function handleLogout() {
+    try {
+      var client = window.MinutarioAPI.getClient();
+      if (client) {
+        await client.auth.signOut();
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    if (realtimeSubscription) {
+      try {
+        realtimeSubscription.unsubscribe();
+      } catch (e) {
+        // ignore
+      }
+      realtimeSubscription = null;
+    }
+
+    clearTokens();
+    await window.MinutarioDB.deleteAllTemplates();
+
+    allTemplates = [];
+    filteredTemplates = [];
+    orgId = null;
+
+    showLoginScreen();
+  }
+
+  // Templates
+  async function loadTemplates() {
+    if (!orgId) {
+      orgId = localStorage.getItem("minutario_org_id");
+    }
+
+    try {
+      var localTemplates = await window.MinutarioDB.getAllTemplates();
+      allTemplates = localTemplates;
+      filterAndRender();
+
+      if (orgId && window.MinutarioSync && window.MinutarioSync.syncTemplates) {
+        window.MinutarioSync.syncTemplates(orgId).then(function(result) {
+          if (result.success) {
+            return window.MinutarioDB.getAllTemplates();
+          }
+          return null;
+        }).then(function(templates) {
+          if (templates) {
+            allTemplates = templates;
+            filterAndRender();
+          }
+        }).catch(function(err) {
+          console.error("Sync error:", err);
+        });
+      }
+    } catch (err) {
+      console.error("Load templates error:", err);
+      showToast("Erro ao carregar templates");
+    }
+  }
+
+  function filterAndRender() {
+    var query = els.searchInput.value.trim().toLowerCase();
+
+    if (!query) {
+      filteredTemplates = allTemplates.slice();
+    } else {
+      filteredTemplates = allTemplates.filter(function(t) {
+        var nameMatch = t.name && t.name.toLowerCase().indexOf(query) !== -1;
+        var shortcutMatch = t.shortcut && t.shortcut.toLowerCase().indexOf(query) !== -1;
+        var contentMatch = t.plain_text && t.plain_text.toLowerCase().indexOf(query) !== -1;
+        return nameMatch || shortcutMatch || contentMatch;
+      });
+    }
+
+    renderTemplateList();
+  }
+
+  function renderTemplateList() {
+    els.templateList.innerHTML = "";
+
+    if (filteredTemplates.length === 0) {
+      els.templateList.classList.add("hidden");
+      els.emptyState.classList.remove("hidden");
+      return;
+    }
+
+    els.templateList.classList.remove("hidden");
+    els.emptyState.classList.add("hidden");
+
+    var fragment = document.createDocumentFragment();
+
+    filteredTemplates.forEach(function(template, index) {
+      var li = document.createElement("li");
+      li.className = "template-item";
+      li.dataset.id = template.id;
+      li.dataset.index = String(index);
+
+      var numberBadge = document.createElement("div");
+      numberBadge.className = "template-number";
+      numberBadge.textContent = String(index + 1);
+      li.appendChild(numberBadge);
+
+      var info = document.createElement("div");
+      info.className = "template-info";
+
+      var nameEl = document.createElement("div");
+      nameEl.className = "template-name";
+      nameEl.textContent = template.name || "Sem nome";
+      info.appendChild(nameEl);
+
+      var meta = document.createElement("div");
+      meta.className = "template-meta";
+
+      var shortcutEl = document.createElement("span");
+      shortcutEl.className = "template-shortcut";
+      shortcutEl.textContent = template.shortcut || "";
+      meta.appendChild(shortcutEl);
+
+      if (template.usage_count !== undefined && template.usage_count !== null) {
+        var usageEl = document.createElement("span");
+        usageEl.className = "template-usage";
+        usageEl.textContent = template.usage_count + " uso" + (template.usage_count === 1 ? "" : "s");
+        meta.appendChild(usageEl);
+      }
+
+      info.appendChild(meta);
+      li.appendChild(info);
+
+      li.addEventListener("click", function() {
+        copyTemplate(template);
+      });
+
+      fragment.appendChild(li);
     });
 
-    if (pulled.folders && pulled.folders.length > 0) {
-      updates.folders = pulled.folders;
-      state.folders = pulled.folders;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await chrome.storage.sync.set(updates);
-      renderFolders();
-      renderFolderOptions();
-      renderTemplateList();
-    }
-
-    showToast('Sincronizado com Supabase.', false);
-  } catch (error) {
-    showToast('Erro no sync: ' + error.message, true);
+    els.templateList.appendChild(fragment);
   }
-}
 
-function showToast(message, isError) {
-  const toastItem = document.createElement('div');
-  toastItem.className = `toast-item ${isError ? 'error' : 'success'}`;
-  toastItem.textContent = message;
+  // Clipboard
+  async function copyTemplate(template) {
+    var name = template.name || "Template";
+    var plainText = template.plain_text || "";
+    var htmlContent = template.html_content || "";
 
-  (els.toast || document.body).appendChild(toastItem);
+    if (!plainText && !htmlContent && template.content) {
+      htmlContent = template.content;
+      plainText = stripHtml(template.content);
+    }
 
-  window.setTimeout(() => {
-    toastItem.remove();
-  }, 3000);
-}
+    if (!plainText && htmlContent) {
+      plainText = stripHtml(htmlContent);
+    }
 
-function generateUUID() {
-  return crypto.randomUUID();
-}
+    var textToCopy = plainText || htmlContent || "";
 
-function stripHtml(html) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html || '', 'text/html');
-  return (doc.body.textContent || '').trim();
-}
+    try {
+      if (navigator.clipboard && navigator.clipboard.write && htmlContent) {
+        var blobHtml = new Blob([htmlContent], { type: "text/html" });
+        var blobText = new Blob([plainText || htmlContent], { type: "text/plain" });
+        var item = new ClipboardItem({
+          "text/html": blobHtml,
+          "text/plain": blobText
+        });
+        await navigator.clipboard.write([item]);
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        throw new Error("Clipboard não suportado");
+      }
 
-function getBytesLength(value) {
-  return new TextEncoder().encode(value).length;
-}
+      showToast("'" + name + "' copiado! Cole com Ctrl+V");
+    } catch (err) {
+      console.error("Copy error:", err);
+      showToast("Erro ao copiar template");
+    }
+  }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
+  function copyTemplateAtIndex(index) {
+    if (index >= 0 && index < filteredTemplates.length) {
+      copyTemplate(filteredTemplates[index]);
+    }
+  }
 
-function escapeHtmlAttr(value) {
-  return escapeHtml(value).replaceAll('`', '&#96;');
-}
+  // Search
+  function handleSearchInput() {
+    if (debounceTimer) {
+      window.clearTimeout(debounceTimer);
+    }
+    debounceTimer = window.setTimeout(function() {
+      filterAndRender();
+    }, 150);
+  }
+
+  // Keyboard shortcuts
+  function handleKeydown(event) {
+    var searchFocused = document.activeElement === els.searchInput;
+
+    // Ctrl+1 to Ctrl+9
+    if (event.ctrlKey && !event.altKey && !event.metaKey) {
+      var keyNum = parseInt(event.key, 10);
+      if (keyNum >= 1 && keyNum <= 9) {
+        event.preventDefault();
+        copyTemplateAtIndex(keyNum - 1);
+        return;
+      }
+    }
+
+    // Enter on search copies first result
+    if (event.key === "Enter" && searchFocused && filteredTemplates.length > 0) {
+      event.preventDefault();
+      copyTemplate(filteredTemplates[0]);
+      return;
+    }
+
+    // Escape clears search
+    if (event.key === "Escape") {
+      if (els.searchInput.value !== "") {
+        els.searchInput.value = "";
+        filterAndRender();
+      }
+      els.searchInput.blur();
+    }
+  }
+
+  // Realtime
+  function subscribeRealtime() {
+    if (!orgId || !window.MinutarioAPI.subscribeToTemplates) {
+      return;
+    }
+
+    realtimeSubscription = window.MinutarioAPI.subscribeToTemplates(orgId, function(payload) {
+      loadTemplates();
+    });
+  }
+
+  // Init dashboard after login
+  async function initDashboard() {
+    showDashboardScreen();
+    updateSyncBadge("idle");
+
+    if (window.MinutarioSync && window.MinutarioSync.onSyncStateChange) {
+      window.MinutarioSync.onSyncStateChange(function(state) {
+        updateSyncBadge(state);
+      });
+    }
+
+    await loadTemplates();
+
+    if (orgId) {
+      subscribeRealtime();
+    }
+  }
+
+  // App init
+  async function init() {
+    cacheElements();
+
+    var tokens = getStoredTokens();
+
+    if (tokens.accessToken && tokens.refreshToken) {
+      try {
+        var client = window.MinutarioAPI.getClient();
+        if (client) {
+          await client.auth.setSession({
+            access_token: tokens.accessToken,
+            refresh_token: tokens.refreshToken
+          });
+
+          var userResult = await client.auth.getUser();
+          if (userResult.error) {
+            throw userResult.error;
+          }
+
+          var user = userResult.data.user;
+          var userOrgId = user && user.user_metadata ? user.user_metadata.org_id : null;
+          if (userOrgId) {
+            orgId = userOrgId;
+            localStorage.setItem("minutario_org_id", orgId);
+          }
+
+          await initDashboard();
+          return;
+        }
+      } catch (err) {
+        console.error("Auth restore failed:", err);
+        clearTokens();
+      }
+    }
+
+    showLoginScreen();
+  }
+
+  // Events
+  function bindEvents() {
+    els.loginForm.addEventListener("submit", handleLogin);
+    els.logoutBtn.addEventListener("click", handleLogout);
+    els.searchInput.addEventListener("input", handleSearchInput);
+    document.addEventListener("keydown", handleKeydown);
+  }
+
+  bindEvents();
+  init();
+
+  // Service Worker
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(console.error);
+  }
+})();
