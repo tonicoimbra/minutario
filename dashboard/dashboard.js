@@ -398,8 +398,6 @@
 
   // App init
   async function init() {
-    cacheElements();
-
     var tokens = getStoredTokens();
 
     if (tokens.accessToken && tokens.refreshToken) {
@@ -443,6 +441,7 @@
     document.addEventListener("keydown", handleKeydown);
   }
 
+  cacheElements();
   bindEvents();
   init();
 

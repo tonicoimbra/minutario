@@ -26,6 +26,9 @@ function bootstrapDom(html) {
     },
     runtime: {
       sendMessage() {},
+      onMessage: {
+        addListener() {},
+      },
     },
   };
 
@@ -500,4 +503,66 @@ test("does not expand shortcut inside a password input", () => {
   assert.equal(handled, false);
   assert.equal(prevented, false);
   assert.equal(input.value, "/contrato");
+});
+
+test("falls back to DOM insertion and still deletes shortcut when rich paste is not handled", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/caso01</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+    setData(type, value) {
+      this.data[type] = value;
+    }
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+  window.ClipboardItem = FakeClipboardItem;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: async () => {},
+    },
+  });
+
+  // Intentionally do NOT call preventDefault() on the paste event,
+  // so dispatchRichPaste returns false and falls back to insertHtmlWithRange.
+  editor.addEventListener("paste", () => {
+    // no-op: page does not handle paste
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/caso01",
+    "<strong>Caso formatado</strong>",
+    "Caso formatado"
+  );
+
+  assert.equal(expanded, true);
+  assert.equal(editor.textContent, "Caso formatado");
+  assert.doesNotMatch(editor.textContent, /\/caso01/);
 });

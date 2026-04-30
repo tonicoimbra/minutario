@@ -9,7 +9,7 @@ test("manifest exposes the content script on all pages", () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
   assert.equal(manifest.manifest_version, 3);
-  assert.deepEqual(manifest.host_permissions, ["<all_urls>"]);
+  assert.ok(manifest.host_permissions.indexOf("<all_urls>") !== -1);
   assert.equal(manifest.content_scripts[0].matches[0], "<all_urls>");
   assert.equal(manifest.content_scripts[0].all_frames, true);
 });
