@@ -5,6 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Minutário</title>
     <link rel="stylesheet" href="./popup.css" />
+    <style>
+      .hidden { display: none !important; }
+      .login-form { display: flex; flex-direction: column; gap: 10px; }
+      .login-form input {
+        padding: 10px 12px;
+        border: 1px solid var(--slate-200);
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 13px;
+      }
+      #login-btn {
+        width: 100%;
+        border: 0;
+        border-radius: 10px;
+        background: var(--tjpr-navy-800);
+        color: #ffffff;
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 11px 12px;
+        cursor: pointer;
+        transition: transform 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+        box-shadow: 0 8px 18px rgba(27, 38, 59, 0.18);
+      }
+      #login-btn:hover {
+        background: var(--tjpr-navy-700);
+        box-shadow: 0 10px 22px rgba(27, 38, 59, 0.24);
+        transform: translateY(-1px);
+      }
+      .login-error {
+        color: #dc2626;
+        font-size: 12px;
+        margin: 8px 0 0;
+        min-height: 18px;
+      }
+      .user-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--slate-200);
+      }
+      .user-email {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--slate-800);
+        max-width: 60%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .sync-status {
+        font-size: 11px;
+        color: var(--slate-500);
+      }
+      .action-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .action-buttons button {
+        width: 100%;
+        border-radius: 10px;
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 11px 12px;
+        cursor: pointer;
+        transition: transform 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+      }
+      #open-dashboard {
+        border: 0;
+        background: var(--tjpr-navy-800);
+        color: #ffffff;
+        box-shadow: 0 8px 18px rgba(27, 38, 59, 0.18);
+      }
+      #open-dashboard:hover {
+        background: var(--tjpr-navy-700);
+        box-shadow: 0 10px 22px rgba(27, 38, 59, 0.24);
+        transform: translateY(-1px);
+      }
+      #force-sync {
+        border: 0;
+        background: var(--tjpr-navy-700);
+        color: #ffffff;
+        box-shadow: 0 8px 18px rgba(27, 38, 59, 0.18);
+      }
+      #force-sync:hover {
+        background: var(--tjpr-navy-600);
+        box-shadow: 0 10px 22px rgba(27, 38, 59, 0.24);
+        transform: translateY(-1px);
+      }
+      #logout {
+        border: 1px solid var(--slate-200);
+        background: var(--slate-100);
+        color: var(--slate-700);
+        box-shadow: none;
+      }
+      #logout:hover {
+        background: #ffffff;
+        border-color: rgba(65, 90, 119, 0.42);
+        transform: translateY(-1px);
+      }
+    </style>
   </head>
   <body>
     <header class="popup-hero">
@@ -16,20 +122,42 @@
       </div>
     </header>
 
-    <main class="popup-card">
-      <button id="open-dashboard" type="button">Abrir painel</button>
+    <section id="login-section" class="popup-card hidden">
+      <form id="login-form" class="login-form">
+        <input type="email" id="login-email" placeholder="Email" required autocomplete="email" />
+        <input type="password" id="login-password" placeholder="Senha" required autocomplete="current-password" />
+        <button type="submit" id="login-btn">Entrar</button>
+      </form>
+      <p id="login-error" class="login-error" aria-live="polite"></p>
+    </section>
+
+    <section id="dashboard-section" class="popup-card hidden">
+      <div class="user-info">
+        <span id="user-email" class="user-email"></span>
+        <span id="sync-status" class="sync-status">Pronto</span>
+      </div>
+      <div class="action-buttons">
+        <button id="open-dashboard" type="button">Abrir Dashboard</button>
+        <button id="force-sync" type="button">Sync Agora</button>
+        <button id="logout" type="button">Sair</button>
+      </div>
 
       <section class="recentes" aria-labelledby="recentes-label">
         <h2 id="recentes-label">Recentes</h2>
         <div id="recent-list"></div>
       </section>
-    </main>
+    </section>
 
     <footer>
-      <span>v1.0.0</span>
+      <span>v1.1.0</span>
       <span>Desenvolvido por Elvertoni Coimbra</span>
     </footer>
 
+    <script src="../lib/supabase.min.js"></script>
+    <script src="../shared/config.js"></script>
+    <script src="../shared/db.js"></script>
+    <script src="../shared/api.js"></script>
+    <script src="../shared/sync.js"></script>
     <script src="./popup.js"></script>
   </body>
 </html>
