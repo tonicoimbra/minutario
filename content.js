@@ -58,8 +58,20 @@
 
   async function loadTemplates() {
     try {
-      var result = await chrome.storage.sync.get(null);
-      templateCache = buildTemplateCache(result);
+      if (global.MinutarioDB) {
+        await global.MinutarioDB.open();
+        var templates = await global.MinutarioDB.getAllTemplates();
+        templateCache = {};
+        templates.forEach(function (t) {
+          if (t.shortcut) {
+            templateCache[t.shortcut.toLowerCase()] = t;
+          }
+        });
+      } else {
+        // Fallback: chrome.storage.sync
+        var result = await chrome.storage.sync.get(null);
+        templateCache = buildTemplateCache(result);
+      }
     } catch (error) {
       console.error("Minutário failed to load templates:", error);
       templateCache = {};
@@ -809,7 +821,7 @@
       return false;
     }
 
-    return insertHtmlWithRange(doc, shortcutRange, normalizedHtml, replacementText);
+    return insertHtmlWithRange(doc, shortcutRange.cloneRange(), normalizedHtml, replacementText);
   }
 
   async function expandTemplateAtSelectionRich(doc, expectedText, html, plainText) {
@@ -837,11 +849,11 @@
       return false;
     }
 
-    if (await pasteHtmlWithRange(doc, shortcutRange, normalizedHtml, replacementText)) {
+    if (await pasteHtmlWithRange(doc, shortcutRange.cloneRange(), normalizedHtml, replacementText)) {
       return true;
     }
 
-    return insertHtmlWithRange(doc, shortcutRange, normalizedHtml, replacementText);
+    return insertHtmlWithRange(doc, shortcutRange.cloneRange(), normalizedHtml, replacementText);
   }
 
   function notifyTemplateUsed(template) {
@@ -958,6 +970,12 @@
     });
 
     if (templateChanged) {
+      loadTemplates();
+    }
+  });
+
+  chrome.runtime.onMessage.addListener(function (message) {
+    if (message && message.type === "TEMPLATES_UPDATED") {
       loadTemplates();
     }
   });
