@@ -1,0 +1,143 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const path = require("node:path");
+
+function bootstrap() {
+  // Minimal mocks
+  global.MinutarioConfig = {
+    DB_NAME: "TestDB",
+    DB_VERSION: 1,
+    LAST_SYNC_KEY: "minutario_last_sync",
+    TEMPLATES_TABLE: "templates",
+  };
+
+  global.MinutarioDB = {
+    _templates: [],
+    _meta: {},
+    getAllTemplates: async function () {
+      return this._templates;
+    },
+    putTemplate: async function (t) {
+      this._templates = this._templates.filter(function (x) { return x.id !== t.id; });
+      this._templates.push(t);
+    },
+    deleteAllTemplates: async function () {
+      this._templates = [];
+    },
+    setMeta: async function (key, value) {
+      this._meta[key] = value;
+    },
+    getMeta: async function (key) {
+      return this._meta[key];
+    },
+  };
+
+  global.MinutarioAPI = {
+    _templates: [],
+    getTemplates: async function (orgId, options) {
+      options = options || {};
+      if (options.since) {
+        return this._templates.filter(function (t) {
+          return t.updated_at >= options.since;
+        });
+      }
+      return this._templates;
+    },
+  };
+
+  delete require.cache[require.resolve("../shared/sync.js")];
+  require(path.join(__dirname, "..", "shared", "sync.js"));
+  return global.MinutarioSync;
+}
+
+test("mergeTemplates prefers remote when newer", () => {
+  var Sync = bootstrap();
+  var local = [
+    { id: "1", name: "Local", updated_at: "2024-01-01T00:00:00Z" },
+  ];
+  var remote = [
+    { id: "1", name: "Remote", updated_at: "2024-02-01T00:00:00Z" },
+  ];
+  var merged = Sync.mergeTemplates(local, remote);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].name, "Remote");
+});
+
+test("mergeTemplates keeps local when newer", () => {
+  var Sync = bootstrap();
+  var local = [
+    { id: "1", name: "Local", updated_at: "2024-03-01T00:00:00Z" },
+  ];
+  var remote = [
+    { id: "1", name: "Remote", updated_at: "2024-02-01T00:00:00Z" },
+  ];
+  var merged = Sync.mergeTemplates(local, remote);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].name, "Local");
+});
+
+test("mergeTemplates adds new remote templates", () => {
+  var Sync = bootstrap();
+  var local = [{ id: "1", name: "A", updated_at: "2024-01-01T00:00:00Z" }];
+  var remote = [
+    { id: "1", name: "A", updated_at: "2024-01-01T00:00:00Z" },
+    { id: "2", name: "B", updated_at: "2024-01-01T00:00:00Z" },
+  ];
+  var merged = Sync.mergeTemplates(local, remote);
+  assert.equal(merged.length, 2);
+});
+
+test("syncTemplates performs delta sync and updates meta", async () => {
+  var Sync = bootstrap();
+  global.MinutarioAPI._templates = [
+    { id: "1", name: "Remote1", updated_at: "2024-06-01T00:00:00Z" },
+  ];
+
+  var result = await Sync.syncTemplates("org1");
+  assert.equal(result.success, true);
+  assert.equal(result.count, 1);
+
+  var all = await global.MinutarioDB.getAllTemplates();
+  assert.equal(all.length, 1);
+  assert.equal(all[0].name, "Remote1");
+
+  var lastSync = await global.MinutarioDB.getMeta("minutario_last_sync");
+  assert.ok(lastSync);
+});
+
+test("fullSync replaces all local with remote", async () => {
+  var Sync = bootstrap();
+  global.MinutarioDB._templates = [
+    { id: "old", name: "Old", updated_at: "2024-01-01T00:00:00Z" },
+  ];
+  global.MinutarioAPI._templates = [
+    { id: "new", name: "New", updated_at: "2024-06-01T00:00:00Z" },
+  ];
+
+  var result = await Sync.fullSync("org1");
+  assert.equal(result.success, true);
+  assert.equal(result.count, 1);
+
+  var all = await global.MinutarioDB.getAllTemplates();
+  assert.equal(all.length, 1);
+  assert.equal(all[0].name, "New");
+});
+
+test("getSyncState returns current state", () => {
+  var Sync = bootstrap();
+  assert.equal(Sync.getSyncState(), "idle");
+});
+
+test("onSyncStateChange receives state updates", async () => {
+  var Sync = bootstrap();
+  var states = [];
+  Sync.onSyncStateChange(function (state) {
+    states.push(state);
+  });
+
+  global.MinutarioAPI._templates = [{ id: "1", name: "A", updated_at: "2024-06-01T00:00:00Z" }];
+  await Sync.syncTemplates("org1");
+
+  assert.ok(states.indexOf("syncing") !== -1);
+  assert.ok(states.indexOf("updated") !== -1);
+});
