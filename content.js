@@ -129,6 +129,27 @@
     return node.isContentEditable || node.getAttribute("contenteditable") === "true";
   }
 
+  function getActiveDocument() {
+    var activeElement = global.document && global.document.activeElement;
+    if (activeElement && activeElement.tagName === "IFRAME") {
+      try {
+        var iframeDoc =
+          activeElement.contentDocument ||
+          (activeElement.contentWindow && activeElement.contentWindow.document);
+        if (iframeDoc) {
+          return iframeDoc;
+        }
+      } catch (e) {
+        // cross-origin iframe — ignore
+      }
+    }
+    return global.document;
+  }
+
+  function getActiveWindow(doc) {
+    return doc && doc.defaultView ? doc.defaultView : global;
+  }
+
   function getSelection(doc) {
     if (!doc) {
       return null;
@@ -297,6 +318,60 @@
     return null;
   }
 
+  function findRangeByTextSearch(doc, root, expectedText) {
+    if (!doc || !root || !expectedText) {
+      return null;
+    }
+
+    var rootText = root.textContent || "";
+    if (!rootText.endsWith(expectedText)) {
+      return null;
+    }
+
+    var targetStart = rootText.length - expectedText.length;
+    var targetEnd = rootText.length;
+    var charIndex = 0;
+    var startNode = null;
+    var startOffset = 0;
+    var endNode = null;
+    var endOffset = 0;
+
+    var nodeFilter = doc.defaultView && doc.defaultView.NodeFilter;
+    var walker = doc.createTreeWalker(root, nodeFilter ? nodeFilter.SHOW_TEXT : 4);
+    var current = walker.nextNode();
+
+    while (current) {
+      var length = current.nodeValue ? current.nodeValue.length : 0;
+
+      if (!startNode && charIndex + length > targetStart) {
+        startNode = current;
+        startOffset = targetStart - charIndex;
+      }
+
+      if (charIndex + length >= targetEnd) {
+        endNode = current;
+        endOffset = targetEnd - charIndex;
+        break;
+      }
+
+      charIndex += length;
+      current = walker.nextNode();
+    }
+
+    if (!startNode || !endNode) {
+      return null;
+    }
+
+    try {
+      var range = doc.createRange();
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
+      return range;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function createShortcutRange(doc, expectedText) {
     var selection = getSelection(doc);
 
@@ -316,19 +391,27 @@
       expectedText.length
     );
 
-    if (!startPosition) {
-      return null;
+    if (startPosition) {
+      var shortcutRange = doc.createRange();
+      shortcutRange.setStart(startPosition.node, startPosition.offset);
+      shortcutRange.setEnd(currentRange.endContainer, currentRange.endOffset);
+
+      if (shortcutRange.toString() === expectedText) {
+        return shortcutRange;
+      }
     }
 
-    var shortcutRange = doc.createRange();
-    shortcutRange.setStart(startPosition.node, startPosition.offset);
-    shortcutRange.setEnd(currentRange.endContainer, currentRange.endOffset);
-
-    if (shortcutRange.toString() !== expectedText) {
-      return null;
+    // Fallback for fragmented DOMs (e.g., Word Online) where walkBackwardsToStart
+    // may fail because the cursor is inside an element node with no preceding text.
+    var root = findEditableRoot(currentRange.endContainer);
+    if (root) {
+      var fallbackRange = findRangeByTextSearch(doc, root, expectedText);
+      if (fallbackRange) {
+        return fallbackRange;
+      }
     }
 
-    return shortcutRange;
+    return null;
   }
 
   function placeCaretAfterNode(doc, node) {
@@ -389,63 +472,34 @@
       return;
     }
 
-    var nodeCtor =
-      doc.defaultView && doc.defaultView.Node
-        ? doc.defaultView.Node
-        : typeof Node !== "undefined"
-          ? Node
-          : null;
-    var lastPosition = null;
-    var fallbackNode = null;
-
-    for (var i = 0; i < nodes.length; i += 1) {
-      var currentNode = nodes[i];
-      if (!currentNode) {
-        continue;
-      }
-
-      if (!fallbackNode) {
-        fallbackNode = currentNode;
-      } else if (
-        fallbackNode.compareDocumentPosition &&
-        nodeCtor &&
-        fallbackNode.compareDocumentPosition(currentNode) &
-          nodeCtor.DOCUMENT_POSITION_FOLLOWING
-      ) {
-        fallbackNode = currentNode;
-      }
-
-      var position = getLastCaretPosition(currentNode);
-      if (!position || !position.node) {
-        continue;
-      }
-
-      if (!lastPosition) {
-        lastPosition = position;
-        continue;
-      }
-
-      if (
-        lastPosition.node.compareDocumentPosition &&
-        nodeCtor &&
-        lastPosition.node.compareDocumentPosition(position.node) &
-          nodeCtor.DOCUMENT_POSITION_FOLLOWING
-      ) {
-        lastPosition = position;
+    // Find the last node that is still attached to the DOM.
+    // Nodes are inserted in array order, so the last attached node
+    // in the array is the rightmost node in the document.
+    var lastNode = null;
+    for (var i = nodes.length - 1; i >= 0; i -= 1) {
+      var candidate = nodes[i];
+      if (candidate && candidate.parentNode) {
+        lastNode = candidate;
+        break;
       }
     }
 
-    if (lastPosition && lastPosition.node) {
+    if (!lastNode) {
+      return;
+    }
+
+    // Try to place caret at the deepest text position inside lastNode.
+    var position = getLastCaretPosition(lastNode);
+    if (position && position.node) {
       var range = doc.createRange();
-      range.setStart(lastPosition.node, lastPosition.offset);
+      range.setStart(position.node, position.offset);
       range.collapse(true);
       selectRange(doc, range);
       return;
     }
 
-    if (fallbackNode) {
-      placeCaretAfterNode(doc, fallbackNode);
-    }
+    // Fallback: place caret immediately after the last inserted node.
+    placeCaretAfterNode(doc, lastNode);
   }
 
   function normalizeInlineChildren(node) {
@@ -998,7 +1052,7 @@
     if (isCompletionKey(event)) {
       var activeBuffer = buffer;
       buffer = "";
-      handleCompletionKey(event, activeBuffer, global.document);
+      handleCompletionKey(event, activeBuffer, getActiveDocument());
       return;
     }
 
