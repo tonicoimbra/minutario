@@ -1,6 +1,6 @@
 (function (global) {
-  var SUPABASE_URL = "https://your-project.supabase.co";
-  var SUPABASE_ANON_KEY = "your-anon-key";
+  var SUPABASE_URL = "https://nvvzcwbriktuhzzzlsnv.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im52dnpjd2JyaWt0dWh6enpsc252Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5OTAwMjgsImV4cCI6MjA5MzU2NjAyOH0.xW_kBoFN3TN3QYd5ee0VfXSrA8vXLt3i4SyLw8CufmM";
 
   var client = null;
 
