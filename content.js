@@ -3,6 +3,260 @@
   var triggerKey = "Space";
   var buffer = "";
   var templateCache = {};
+  var reloadTimer = null;
+  var debugEnabled = !!(global.MinutarioConfig && global.MinutarioConfig.DEBUG_LOGS);
+  var WORD_PROBE_STORAGE_KEY = "minutario_last_word_probe";
+
+  function debugLog(message, details) {
+    if (!debugEnabled || !global.console || typeof global.console.debug !== "function") {
+      return;
+    }
+
+    if (typeof details === "undefined") {
+      global.console.debug("[Minutário]", message);
+      return;
+    }
+
+    global.console.debug("[Minutário]", message, details);
+  }
+
+  function getErrorMessage(error) {
+    if (!error) {
+      return "";
+    }
+
+    if (typeof error === "string") {
+      return error;
+    }
+
+    if (typeof error.message === "string") {
+      return error.message;
+    }
+
+    try {
+      return String(error);
+    } catch (stringifyError) {
+      return "";
+    }
+  }
+
+  function isBenignExtensionContextError(error) {
+    return getErrorMessage(error).toLowerCase().indexOf("context invalidated") !== -1;
+  }
+
+  function shortText(value, limit) {
+    var text = String(value || "");
+    var max = typeof limit === "number" ? limit : 240;
+    return text.length > max ? text.slice(0, max) + "..." : text;
+  }
+
+  function getDocumentProbeContext(doc) {
+    if (!doc) {
+      return "";
+    }
+
+    return [doc.URL || "", doc.referrer || ""].join(" ");
+  }
+
+  function isWordOnlineDocument(doc) {
+    if (!doc) {
+      return false;
+    }
+
+    return /officeapps\.live\.com|wordeditorframe\.aspx|wordeditorframe/i.test(
+      getDocumentProbeContext(doc)
+    );
+  }
+
+  function collectNestedDocuments(doc, path, acc, seen) {
+    if (!doc || !acc || !seen || seen.indexOf(doc) !== -1) {
+      return;
+    }
+
+    seen.push(doc);
+    acc.push({ doc: doc, path: path || "document" });
+
+    var iframes = [];
+    try {
+      iframes = Array.prototype.slice.call(doc.querySelectorAll("iframe"));
+    } catch (error) {
+      iframes = [];
+    }
+
+    iframes.forEach(function(iframe, index) {
+      try {
+        if (iframe.contentDocument) {
+          collectNestedDocuments(iframe.contentDocument, (path || "document") + " > iframe[" + index + "]", acc, seen);
+        }
+      } catch (iframeError) {
+        // cross-origin or sandboxed iframe
+      }
+    });
+  }
+
+  function collectEditorDiagnostics(doc, expectedText, replacementText) {
+    var documents = [];
+    collectNestedDocuments(doc, "document", documents, []);
+
+    return {
+      expectedText: expectedText || "",
+      replacementText: replacementText || "",
+      documents: documents.map(function(entry) {
+        var currentDoc = entry.doc;
+        var selection = null;
+        var active = null;
+        var editables = [];
+
+        try {
+          selection = currentDoc.getSelection ? currentDoc.getSelection() : null;
+        } catch (selectionError) {
+          selection = null;
+        }
+
+        try {
+          active = currentDoc.activeElement;
+        } catch (activeError) {
+          active = null;
+        }
+
+        try {
+          var rootCandidates = collectEditableRoots(
+            currentDoc.body || currentDoc.documentElement || currentDoc
+          );
+
+          if (active && isEditorRootElement(active) && rootCandidates.indexOf(active) === -1) {
+            rootCandidates.unshift(active);
+          }
+
+          if (selection && selection.anchorNode) {
+            var anchorRoot = findEditableRoot(selection.anchorNode);
+            if (anchorRoot && rootCandidates.indexOf(anchorRoot) === -1) {
+              rootCandidates.unshift(anchorRoot);
+            }
+          }
+
+          editables = rootCandidates
+            .filter(function(el) {
+              var text = el.innerText || el.textContent || "";
+              return (
+                (!!expectedText && text.indexOf(expectedText) !== -1) ||
+                (!!replacementText && text.indexOf(replacementText) !== -1) ||
+                el === active
+              );
+            })
+            .slice(0, 12)
+            .map(function(el) {
+              return {
+                tag: el.tagName,
+                id: el.id || "",
+                cls: shortText(el.className || "", 120),
+                connected: !!el.isConnected,
+                text: shortText(el.innerText || el.textContent || "", 300),
+                html: shortText(el.innerHTML || "", 300),
+              };
+            });
+        } catch (editableError) {
+          editables = [];
+        }
+
+        return {
+          path: entry.path,
+          url: currentDoc.URL,
+          activeTag: active && active.tagName,
+          activeId: active && active.id,
+          activeCls: active && shortText(active.className || "", 120),
+          selectionText: selection ? shortText(selection.toString(), 200) : "",
+          anchorText:
+            selection && selection.anchorNode
+              ? shortText(selection.anchorNode.textContent || selection.anchorNode.nodeValue || "", 200)
+              : "",
+          focusText:
+            selection && selection.focusNode
+              ? shortText(selection.focusNode.textContent || selection.focusNode.nodeValue || "", 200)
+              : "",
+          editables: editables,
+        };
+      }),
+    };
+  }
+
+  function logWordProbe(doc, phase, expectedText, replacementText) {
+    if (!isWordOnlineDocument(doc)) {
+      return;
+    }
+
+    var probe = {
+      phase: phase,
+      capturedAt: new Date().toISOString(),
+      url: doc && doc.URL ? doc.URL : "",
+      referrer: doc && doc.referrer ? doc.referrer : "",
+      diagnostics: collectEditorDiagnostics(doc, expectedText, replacementText),
+    };
+
+    if (global.console && typeof global.console.info === "function") {
+      global.console.info("[Minutário Probe]", phase, probe);
+    }
+
+    try {
+      if (
+        chrome &&
+        chrome.storage &&
+        chrome.storage.local &&
+        typeof chrome.storage.local.set === "function"
+      ) {
+        var storagePayload = {};
+        storagePayload[WORD_PROBE_STORAGE_KEY] = probe;
+        chrome.storage.local.set(storagePayload);
+      }
+    } catch (storageError) {
+      // Ignore probe persistence errors.
+    }
+  }
+
+  function logWordDecision(doc, phase, details) {
+    if (!isWordOnlineDocument(doc)) {
+      return;
+    }
+
+    var probe = {
+      phase: phase,
+      capturedAt: new Date().toISOString(),
+      url: doc && doc.URL ? doc.URL : "",
+      referrer: doc && doc.referrer ? doc.referrer : "",
+      details: details || {},
+    };
+
+    if (global.console && typeof global.console.info === "function") {
+      global.console.info("[Minutário Probe]", phase, probe);
+    }
+
+    try {
+      if (
+        chrome &&
+        chrome.storage &&
+        chrome.storage.local &&
+        typeof chrome.storage.local.set === "function"
+      ) {
+        var storagePayload = {};
+        storagePayload[WORD_PROBE_STORAGE_KEY] = probe;
+        chrome.storage.local.set(storagePayload);
+      }
+    } catch (storageError) {
+      // Ignore probe persistence errors.
+    }
+  }
+
+  function scheduleWordProbeSnapshots(doc, expectedText, replacementText) {
+    if (!isWordOnlineDocument(doc) || typeof global.setTimeout !== "function") {
+      return;
+    }
+
+    [0, 150, 500, 1200].forEach(function(delay) {
+      global.setTimeout(function() {
+        logWordProbe(doc, "snapshot-" + delay + "ms", expectedText, replacementText);
+      }, delay);
+    });
+  }
 
   function applySettings(settings) {
     if (settings && typeof settings === "object") {
@@ -14,11 +268,16 @@
         typeof settings.triggerKey === "string" && settings.triggerKey.length > 0
           ? settings.triggerKey
           : "Space";
+      debugEnabled =
+        typeof settings.debugLogs === "boolean"
+          ? settings.debugLogs
+          : !!(global.MinutarioConfig && global.MinutarioConfig.DEBUG_LOGS);
       return;
     }
 
     triggerChar = "/";
     triggerKey = "Space";
+    debugEnabled = !!(global.MinutarioConfig && global.MinutarioConfig.DEBUG_LOGS);
   }
 
   async function loadSettings() {
@@ -56,26 +315,89 @@
     return nextCache;
   }
 
+  function buildTemplateCacheFromList(templates) {
+    var nextCache = {};
+
+    (templates || []).forEach(function (template) {
+      if (!template || typeof template !== "object") {
+        return;
+      }
+
+      var shortcut =
+        typeof template.shortcut === "string" ? template.shortcut.toLowerCase() : "";
+
+      if (!shortcut) {
+        return;
+      }
+
+      nextCache[shortcut] = template;
+    });
+
+    return nextCache;
+  }
+
   async function loadTemplates() {
     try {
-      if (global.MinutarioDB) {
-        await global.MinutarioDB.open();
-        var templates = await global.MinutarioDB.getAllTemplates();
-        templateCache = {};
-        templates.forEach(function (t) {
-          if (t.shortcut) {
-            templateCache[t.shortcut.toLowerCase()] = t;
+      if (chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
+        try {
+          var response = await chrome.runtime.sendMessage({
+            type: "GET_TEMPLATES",
+            payload: {},
+          });
+
+          if (response && response.ok && Array.isArray(response.data)) {
+            templateCache = buildTemplateCacheFromList(response.data);
+            debugLog("Templates carregados via background.", {
+              count: Object.keys(templateCache).length,
+            });
+            return;
           }
-        });
-      } else {
+        } catch (runtimeError) {
+          if (!isBenignExtensionContextError(runtimeError)) {
+            console.warn("Minutário falhou ao carregar templates via background, tentando fallback...", runtimeError);
+          }
+        }
+      }
+
+      var loadedFromDB = false;
+      if (global.MinutarioDB) {
+        try {
+          await global.MinutarioDB.open();
+          var templates = await global.MinutarioDB.getAllTemplates();
+          templateCache = buildTemplateCacheFromList(templates);
+          loadedFromDB = true;
+          debugLog("Templates carregados do IndexedDB local.", {
+            count: Object.keys(templateCache).length,
+          });
+        } catch (dbError) {
+          console.warn("Minutário falhou ao carregar do banco local (IndexedDB), tentando fallback...", dbError);
+        }
+      }
+
+      if (!loadedFromDB) {
         // Fallback: chrome.storage.sync
         var result = await chrome.storage.sync.get(null);
         templateCache = buildTemplateCache(result);
+        debugLog("Templates carregados via chrome.storage.sync.", {
+          count: Object.keys(templateCache).length,
+        });
       }
     } catch (error) {
       console.error("Minutário failed to load templates:", error);
       templateCache = {};
     }
+  }
+
+  function scheduleTemplateReload(reason) {
+    if (reloadTimer) {
+      global.clearTimeout(reloadTimer);
+    }
+
+    reloadTimer = global.setTimeout(function () {
+      debugLog("Recarregando templates.", { reason: reason || "unknown" });
+      loadTemplates();
+      reloadTimer = null;
+    }, 50);
   }
 
   function isShortcutChar(key) {
@@ -121,12 +443,31 @@
     return tagName === "INPUT" && /^(text|search|url|tel|email)$/i.test(node.type || "");
   }
 
+  function isWordOnlineSurfaceElement(node) {
+    if (!node || node.nodeType !== 1) {
+      return false;
+    }
+
+    var id = node.id || "";
+    var className = String(node.className || "");
+
+    return (
+      id === "WACViewPanel_EditingElement" ||
+      /\bWACEditing\b/.test(className) ||
+      /\bEditingSurfaceBody\b/.test(className)
+    );
+  }
+
   function isContentEditableElement(node) {
     if (!node || node.nodeType !== 1) {
       return false;
     }
 
     return node.isContentEditable || node.getAttribute("contenteditable") === "true";
+  }
+
+  function isEditorRootElement(node) {
+    return isContentEditableElement(node) || isWordOnlineSurfaceElement(node);
   }
 
   function getActiveDocument() {
@@ -144,6 +485,15 @@
       }
     }
     return global.document;
+  }
+
+  function getEventDocument(event) {
+    var target = event && event.target;
+    if (target && target.ownerDocument) {
+      return target.ownerDocument;
+    }
+
+    return getActiveDocument();
   }
 
   function getActiveWindow(doc) {
@@ -176,7 +526,7 @@
     var lastEditable = null;
 
     while (current && current.nodeType) {
-      if (isContentEditableElement(current)) {
+      if (isEditorRootElement(current)) {
         lastEditable = current;
       }
 
@@ -231,6 +581,186 @@
 
     selection.removeAllRanges();
     selection.addRange(range);
+  }
+
+  function createRangeFromTextOffsets(doc, root, startOffset, endOffset) {
+    if (!doc || !root || startOffset < 0 || endOffset < startOffset) {
+      return null;
+    }
+
+    var start = resolveTextPosition(doc, root, startOffset);
+    var end = resolveTextPosition(doc, root, endOffset);
+
+    if (!start || !start.node || !end || !end.node) {
+      return null;
+    }
+
+    try {
+      var range = doc.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      return range;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function getTextOffsetWithinRoot(doc, root, node, offset) {
+    if (!doc || !root || !node) {
+      return -1;
+    }
+
+    if (node === root) {
+      return offset;
+    }
+
+    var walker = createTextWalker(doc, root);
+    var current = walker.nextNode();
+    var total = 0;
+
+    while (current) {
+      if (current === node) {
+        return total + offset;
+      }
+
+      total += current.nodeValue ? current.nodeValue.length : 0;
+      current = walker.nextNode();
+    }
+
+    return -1;
+  }
+
+  function captureShortcutContext(doc, range) {
+    if (!doc || !range) {
+      return null;
+    }
+
+    var root =
+      findEditableRoot(range.commonAncestorContainer) ||
+      findEditableRoot(range.startContainer) ||
+      findEditableRoot(doc.activeElement);
+
+    if (!root) {
+      return null;
+    }
+
+    var startOffset = getTextOffsetWithinRoot(
+      doc,
+      root,
+      range.startContainer,
+      range.startOffset
+    );
+
+    if (startOffset < 0) {
+      return { root: root, startOffset: -1 };
+    }
+
+    return {
+      root: root,
+      scope: doc.body || doc.documentElement || root,
+      startOffset: startOffset,
+    };
+  }
+
+  function collectEditableRoots(scope) {
+    var roots = [];
+
+    if (!scope || !scope.nodeType) {
+      return roots;
+    }
+
+    if (isEditorRootElement(scope)) {
+      roots.push(scope);
+    }
+
+    if (scope.querySelectorAll) {
+      var matches = scope.querySelectorAll(
+        '[contenteditable="true"], #WACViewPanel_EditingElement, .WACEditing, .EditingSurfaceBody'
+      );
+      for (var i = 0; i < matches.length; i += 1) {
+        if (roots.indexOf(matches[i]) === -1) {
+          roots.push(matches[i]);
+        }
+      }
+    }
+
+    return roots;
+  }
+
+  function createCleanupRange(doc, root, startOffset, expectedText) {
+    if (!doc || !root || startOffset < 0 || !expectedText) {
+      return null;
+    }
+
+    var rootText = root.textContent || "";
+    var endOffset = startOffset + expectedText.length;
+
+    if (rootText.slice(startOffset, endOffset) !== expectedText) {
+      return null;
+    }
+
+    var nextChar = rootText.charAt(endOffset);
+    if (nextChar && /[\s\u00a0]/.test(nextChar)) {
+      endOffset += 1;
+    }
+
+    return createRangeFromTextOffsets(doc, root, startOffset, endOffset);
+  }
+
+  function isIgnorableShortcutChar(char) {
+    return char === "\u200b" || char === "\u200c" || char === "\u200d" || char === "\ufeff";
+  }
+
+  function findShortcutOffsets(rootText, expectedText) {
+    if (!rootText || !expectedText) {
+      return [];
+    }
+
+    var matches = [];
+
+    for (var start = 0; start < rootText.length; start += 1) {
+      if (rootText.charAt(start) !== expectedText.charAt(0)) {
+        continue;
+      }
+
+      var textIndex = start;
+      var expectedIndex = 0;
+
+      while (textIndex < rootText.length && expectedIndex < expectedText.length) {
+        var currentChar = rootText.charAt(textIndex);
+
+        if (isIgnorableShortcutChar(currentChar)) {
+          textIndex += 1;
+          continue;
+        }
+
+        if (currentChar !== expectedText.charAt(expectedIndex)) {
+          break;
+        }
+
+        textIndex += 1;
+        expectedIndex += 1;
+      }
+
+      if (expectedIndex !== expectedText.length) {
+        continue;
+      }
+
+      while (textIndex < rootText.length && isIgnorableShortcutChar(rootText.charAt(textIndex))) {
+        textIndex += 1;
+      }
+
+      if (/[\s\u00a0]/.test(rootText.charAt(textIndex) || "")) {
+        textIndex += 1;
+      }
+
+      matches.push({
+        startOffset: start,
+        endOffset: textIndex,
+      });
+    }
+
+    return matches;
   }
 
   function walkBackwardsToStart(endContainer, endOffset, length) {
@@ -774,20 +1304,259 @@
     }
   }
 
-  async function pasteHtmlWithRange(doc, range, html, plainText) {
+  function normalizeEditorTextForRecovery(text) {
+    return String(text || "")
+      .replace(/[\u200b\u200c\u200d\ufeff]/g, "")
+      .replace(/\u00a0/g, " ")
+      .trim();
+  }
+
+  function collectRecoveryRoots(context) {
+    var roots = [];
+
+    if (!context) {
+      return roots;
+    }
+
+    if (context.root && context.root.isConnected) {
+      roots.push(context.root);
+    }
+
+    collectEditableRoots(context.scope).forEach(function(root) {
+      if (roots.indexOf(root) === -1) {
+        roots.push(root);
+      }
+    });
+
+    return roots;
+  }
+
+  function recoverRichPasteWithDomInsertion(doc, context, html, plainText) {
+    if (!doc || !context) {
+      return false;
+    }
+
+    var roots = collectRecoveryRoots(context);
+
+    for (var i = 0; i < roots.length; i += 1) {
+      var root = roots[i];
+      if (!root || !root.isConnected) {
+        continue;
+      }
+
+      var normalizedRootText = normalizeEditorTextForRecovery(root.textContent || "");
+      if (normalizedRootText) {
+        continue;
+      }
+
+      var recoveryRange = null;
+      if ((root.textContent || "").length > 0) {
+        recoveryRange = doc.createRange();
+        recoveryRange.selectNodeContents(root);
+      } else if (typeof context.startOffset === "number" && context.startOffset >= 0) {
+        recoveryRange = createRangeFromTextOffsets(
+          doc,
+          root,
+          context.startOffset,
+          context.startOffset
+        );
+      }
+
+      if (!recoveryRange) {
+        recoveryRange = getSelectedRange(doc);
+      }
+
+      if (!recoveryRange) {
+        continue;
+      }
+
+      return insertHtmlWithRange(doc, recoveryRange, html, plainText);
+    }
+
+    return false;
+  }
+
+  function cleanupResidualShortcut(doc, context, expectedText) {
+    if (!doc || !context || !expectedText) {
+      return;
+    }
+
+    var candidateRoots = [];
+
+    if (context.root) {
+      candidateRoots.push(context.root);
+    }
+
+    collectEditableRoots(context.scope).forEach(function(root) {
+      if (candidateRoots.indexOf(root) === -1) {
+        candidateRoots.push(root);
+      }
+    });
+
+    for (var rootIndex = 0; rootIndex < candidateRoots.length; rootIndex += 1) {
+      var root = candidateRoots[rootIndex];
+      if (!root || !root.isConnected) {
+        continue;
+      }
+
+      if (root === context.root && typeof context.startOffset === "number" && context.startOffset >= 0) {
+        var exactRange = createCleanupRange(
+          doc,
+          root,
+          context.startOffset,
+          expectedText
+        );
+
+        if (
+          exactRange &&
+          exactRange.toString().replace(/[\s\u00a0]+$/, "") === expectedText
+        ) {
+          deleteRangeForInsertion(doc, exactRange);
+          return;
+        }
+      }
+
+      var rootText = root.textContent || "";
+      var matches = findShortcutOffsets(rootText, expectedText);
+      if (matches.length === 0) {
+        continue;
+      }
+
+      var targetMatch = null;
+
+      if (root === context.root && typeof context.startOffset === "number" && context.startOffset >= 0) {
+        var closestDistance = Infinity;
+        for (var i = 0; i < matches.length; i += 1) {
+          var distance = Math.abs(matches[i].startOffset - context.startOffset);
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            targetMatch = matches[i];
+          }
+        }
+      } else if (matches.length === 1) {
+        targetMatch = matches[0];
+      } else if (matches[matches.length - 1].endOffset === rootText.length) {
+        targetMatch = matches[matches.length - 1];
+      } else if (matches[0].startOffset === 0) {
+        targetMatch = matches[0];
+      } else {
+        targetMatch = matches[0];
+      }
+
+      if (!targetMatch) {
+        continue;
+      }
+
+      var residualRange = createRangeFromTextOffsets(
+        doc,
+        root,
+        targetMatch.startOffset,
+        targetMatch.endOffset
+      );
+
+      if (
+        residualRange &&
+        residualRange.toString().replace(/[\s\u00a0\u200b\u200c\u200d\ufeff]+/g, "") ===
+          expectedText
+      ) {
+        deleteRangeForInsertion(doc, residualRange);
+        return;
+      }
+    }
+  }
+
+  function scheduleResidualShortcutCleanup(doc, context, expectedText) {
+    if (!doc || !context || !expectedText || typeof global.setTimeout !== "function") {
+      return;
+    }
+
+    [0, 30, 120, 250, 500, 1000, 1500].forEach(function(delay) {
+      global.setTimeout(function() {
+        cleanupResidualShortcut(doc, context, expectedText);
+      }, delay);
+    });
+
+    if (global.MutationObserver && context.scope) {
+      var observer = new global.MutationObserver(function() {
+        cleanupResidualShortcut(doc, context, expectedText);
+      });
+
+      observer.observe(context.scope, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+
+      global.setTimeout(function() {
+        observer.disconnect();
+      }, 1800);
+    }
+  }
+
+  function scheduleRichPasteRecovery(doc, context, html, plainText) {
+    if (!doc || !context || !html || typeof global.setTimeout !== "function") {
+      return;
+    }
+
+    [30, 120, 250, 500, 1000, 1500].forEach(function(delay) {
+      global.setTimeout(function() {
+        recoverRichPasteWithDomInsertion(doc, context, html, plainText);
+      }, delay);
+    });
+
+    if (global.MutationObserver && context.scope) {
+      var observer = new global.MutationObserver(function() {
+        recoverRichPasteWithDomInsertion(doc, context, html, plainText);
+      });
+
+      observer.observe(context.scope, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+
+      global.setTimeout(function() {
+        observer.disconnect();
+      }, 1800);
+    }
+  }
+
+  async function pasteHtmlWithRange(doc, range, expectedText, html, plainText) {
     if (!doc || !range || !html) {
       return false;
     }
 
+    var shortcutContext = captureShortcutContext(doc, range);
+    logWordProbe(doc, "before-clipboard-write", expectedText, plainText);
+
+    // Keep clipboard persistence off the critical path. The synthetic paste event
+    // already carries HTML/plain-text payloads, so waiting on clipboard.write()
+    // only delays the delete -> select -> paste sequence that Word Online is
+    // sensitive to.
+    writeRichClipboard(doc, html, plainText).catch(function() {
+      return false;
+    });
+
+    logWordProbe(doc, "before-shortcut-delete", expectedText, plainText);
     var insertionRange = deleteRangeForInsertion(doc, range);
     if (!insertionRange) {
       return false;
     }
 
-    var clipboardWritten = await writeRichClipboard(doc, html, plainText);
     selectRange(doc, insertionRange);
+    logWordProbe(doc, "after-shortcut-delete", expectedText, plainText);
 
-    return dispatchRichPaste(doc, insertionRange, html, plainText);
+    var handled = dispatchRichPaste(doc, insertionRange, html, plainText);
+    if (handled) {
+      recoverRichPasteWithDomInsertion(doc, shortcutContext, html, plainText);
+      scheduleRichPasteRecovery(doc, shortcutContext, html, plainText);
+      cleanupResidualShortcut(doc, shortcutContext, expectedText);
+      scheduleResidualShortcutCleanup(doc, shortcutContext, expectedText);
+      scheduleWordProbeSnapshots(doc, expectedText, plainText);
+      return true;
+    }
+
+    return insertHtmlWithRange(doc, insertionRange.cloneRange(), html, plainText);
   }
 
   function insertHtmlWithRange(doc, range, html, plainText) {
@@ -903,19 +1672,29 @@
       return false;
     }
 
-    if (await pasteHtmlWithRange(doc, shortcutRange.cloneRange(), normalizedHtml, replacementText)) {
-      return true;
-    }
-
-    return insertHtmlWithRange(doc, shortcutRange.cloneRange(), normalizedHtml, replacementText);
+    return pasteHtmlWithRange(
+      doc,
+      shortcutRange.cloneRange(),
+      expectedText,
+      normalizedHtml,
+      replacementText
+    );
   }
 
   function notifyTemplateUsed(template) {
     if (chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
-      chrome.runtime.sendMessage({
+      var result = chrome.runtime.sendMessage({
         type: "UPDATE_RECENT",
         payload: { templateId: template.id },
       });
+
+      if (result && typeof result.catch === "function") {
+        result.catch(function(error) {
+          if (!isBenignExtensionContextError(error)) {
+            console.warn("Minutário falhou ao registrar template recente.", error);
+          }
+        });
+      }
     }
   }
 
@@ -929,29 +1708,55 @@
     var template = templateCache[shortcut];
 
     if (!template || typeof template.content !== "string") {
+      debugLog("Atalho digitado sem correspondência exata.", {
+        shortcut: shortcut,
+      });
       return false;
     }
 
     var plainText = stripHtml(template.content);
     var targetDoc = doc || global.document;
     var activeElement = targetDoc.activeElement;
+    var canAttemptRichPaste =
+      canUseRichPaste(targetDoc, template.content) && !isTextControl(activeElement);
+    var shortcutRange = null;
+
+    logWordDecision(targetDoc, "completion-key-received", {
+      activeBuffer: activeBuffer,
+      activeTag: activeElement && activeElement.tagName,
+      activeContenteditable:
+        !!(activeElement && activeElement.getAttribute && activeElement.getAttribute("contenteditable") === "true"),
+      isTextControl: isTextControl(activeElement),
+      canUseRichPaste: canUseRichPaste(targetDoc, template.content),
+    });
 
     if (
       activeElement &&
       (activeElement.tagName === "INPUT" || activeElement.tagName === "TEXTAREA") &&
       !isTextControl(activeElement)
     ) {
+      logWordDecision(targetDoc, "completion-key-blocked-nontext-input", {
+        activeTag: activeElement.tagName,
+        inputType: activeElement.type || "",
+      });
       return false;
     }
 
-    if (
-      canUseRichPaste(targetDoc, template.content) &&
-      !isTextControl(activeElement)
-    ) {
-      if (!createShortcutRange(targetDoc, activeBuffer)) {
+    if (canAttemptRichPaste) {
+      shortcutRange = createShortcutRange(targetDoc, activeBuffer);
+      if (!shortcutRange) {
+        logWordDecision(targetDoc, "completion-key-missing-shortcut-range", {
+          activeBuffer: activeBuffer,
+          selectionText: (getSelection(targetDoc) && getSelection(targetDoc).toString()) || "",
+          activeTag: activeElement && activeElement.tagName,
+        });
         return false;
       }
 
+      logWordDecision(targetDoc, "completion-key-rich-paste", {
+        activeBuffer: activeBuffer,
+        activeTag: activeElement && activeElement.tagName,
+      });
       event.preventDefault();
       expandTemplateAtSelectionRich(
         targetDoc,
@@ -959,6 +1764,10 @@
         template.content,
         plainText
       ).then(function (expanded) {
+        debugLog("Tentativa de expansão rica concluída.", {
+          shortcut: shortcut,
+          expanded: expanded,
+        });
         if (expanded) {
           notifyTemplateUsed(template);
         }
@@ -969,6 +1778,12 @@
       return true;
     }
 
+    logWordDecision(targetDoc, "completion-key-plain-fallback", {
+      activeBuffer: activeBuffer,
+      activeTag: activeElement && activeElement.tagName,
+      canUseRichPaste: canUseRichPaste(targetDoc, template.content),
+    });
+
     var expanded = expandTemplateAtSelection(
       targetDoc,
       activeBuffer,
@@ -977,6 +1792,9 @@
     );
 
     if (!expanded) {
+      debugLog("Falha na expansão simples.", {
+        shortcut: shortcut,
+      });
       return false;
     }
 
@@ -989,6 +1807,7 @@
   var api = {
     expandTemplateAtSelection: expandTemplateAtSelection,
     expandTemplateAtSelectionRich: expandTemplateAtSelectionRich,
+    collectEditorDiagnostics: collectEditorDiagnostics,
     createShortcutRange: createShortcutRange,
     insertHtmlWithRange: insertHtmlWithRange,
     pasteHtmlWithRange: pasteHtmlWithRange,
@@ -1030,12 +1849,61 @@
 
   chrome.runtime.onMessage.addListener(function (message) {
     if (message && message.type === "TEMPLATES_UPDATED") {
-      loadTemplates();
+      scheduleTemplateReload("runtime-message");
     }
   });
 
+  if (global.addEventListener) {
+    global.addEventListener("focus", function () {
+      scheduleTemplateReload("window-focus");
+    }, true);
+  }
+
+  if (global.document && global.document.addEventListener) {
+    global.document.addEventListener("visibilitychange", function () {
+      if (!global.document.hidden) {
+        scheduleTemplateReload("visibilitychange");
+      }
+    });
+  }
+
+  if (global.MutationObserver && global.document && global.document.documentElement) {
+    var observer = new global.MutationObserver(function (mutations) {
+      var shouldReload = mutations.some(function (mutation) {
+        return Array.prototype.some.call(mutation.addedNodes || [], function (node) {
+          if (!node || node.nodeType !== 1) {
+            return false;
+          }
+
+          if (isTextControl(node) || isContentEditableElement(node) || node.tagName === "IFRAME") {
+            return true;
+          }
+
+          return !!node.querySelector && !!node.querySelector(
+            'input[type="text"], textarea, [contenteditable="true"], iframe'
+          );
+        });
+      });
+
+      if (shouldReload) {
+        scheduleTemplateReload("dynamic-editor-added");
+      }
+    });
+
+    observer.observe(global.document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
   global.document.addEventListener("keydown", function (event) {
+    var eventDoc = getEventDocument(event);
+
     if (event.key === triggerChar) {
+      logWordDecision(eventDoc, "keydown-trigger-char", {
+        key: event.key,
+        code: event.code || "",
+      });
       buffer = triggerChar;
       return;
     }
@@ -1046,19 +1914,34 @@
 
     if (isShortcutChar(event.key)) {
       buffer += event.key;
+      logWordDecision(eventDoc, "keydown-buffer-char", {
+        key: event.key,
+        code: event.code || "",
+        buffer: buffer,
+      });
       return;
     }
 
     if (isCompletionKey(event)) {
       var activeBuffer = buffer;
       buffer = "";
-      handleCompletionKey(event, activeBuffer, getActiveDocument());
+      logWordDecision(eventDoc, "keydown-completion-key", {
+        key: event.key,
+        code: event.code || "",
+        activeBuffer: activeBuffer,
+      });
+      handleCompletionKey(event, activeBuffer, eventDoc);
       return;
     }
 
+    logWordDecision(eventDoc, "keydown-buffer-reset", {
+      key: event.key,
+      code: event.code || "",
+      buffer: buffer,
+    });
     buffer = "";
   }, true);
 
   loadSettings();
-  loadTemplates();
+  scheduleTemplateReload("startup");
 })(typeof globalThis !== "undefined" ? globalThis : this);

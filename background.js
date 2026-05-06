@@ -12,13 +12,86 @@ const RECENT_KEY = "recent";
 const MAX_RECENT = 3;
 const SYNC_ALARM_NAME = "minutario-sync";
 const SYNC_INTERVAL_MINUTES = 5;
+const QUICK_ACCESS_WINDOW_WIDTH = 1120;
+const QUICK_ACCESS_WINDOW_HEIGHT = 760;
 
 const migrationState = {
   failed: false,
 };
 
+function getErrorMessage(exception) {
+  if (!exception) {
+    return "";
+  }
+
+  if (typeof exception === "string") {
+    return exception;
+  }
+
+  if (typeof exception.message === "string") {
+    return exception.message;
+  }
+
+  if (exception.lastError && typeof exception.lastError.message === "string") {
+    return exception.lastError.message;
+  }
+
+  if (exception.cause) {
+    var causeMessage = getErrorMessage(exception.cause);
+    if (causeMessage) {
+      return causeMessage;
+    }
+  }
+
+  if (exception.error) {
+    var nestedErrorMessage = getErrorMessage(exception.error);
+    if (nestedErrorMessage) {
+      return nestedErrorMessage;
+    }
+  }
+
+  try {
+    var serialized = JSON.stringify(exception);
+    if (serialized && serialized !== "{}") {
+      return serialized;
+    }
+  } catch (serializationError) {
+    // Ignore serialization failures and continue to generic string conversion.
+  }
+
+  try {
+    return String(exception);
+  } catch (error) {
+    return "";
+  }
+}
+
+function isBenignStorageMigrationError(exception) {
+  var message = getErrorMessage(exception).toLowerCase();
+  return message.indexOf("context invalidated") !== -1;
+}
+
 function logMigrationError(step, key, exception) {
-  console.error("Storage migration error", { step, key, exception });
+  if (isBenignStorageMigrationError(exception)) {
+    return;
+  }
+
+  console.error("Storage migration error", {
+    step,
+    key,
+    message: getErrorMessage(exception),
+    exception,
+  });
+}
+
+function handleMigrationError(step, key, exception) {
+  if (isBenignStorageMigrationError(exception)) {
+    return false;
+  }
+
+  migrationState.failed = true;
+  logMigrationError(step, key, exception);
+  return true;
 }
 
 async function applyMigration(step) {
@@ -35,8 +108,7 @@ async function runStartupMigration() {
     const rawVersion = stored[STORAGE_VERSION_KEY];
     storedVersion = Number.isInteger(rawVersion) ? rawVersion : 0;
   } catch (error) {
-    migrationState.failed = true;
-    logMigrationError("read", STORAGE_VERSION_KEY, error);
+    handleMigrationError("read", STORAGE_VERSION_KEY, error);
     return;
   }
 
@@ -48,8 +120,7 @@ async function runStartupMigration() {
     try {
       await applyMigration(step);
     } catch (error) {
-      migrationState.failed = true;
-      logMigrationError(step, "migration", error);
+      handleMigrationError(step, "migration", error);
       return;
     }
   }
@@ -57,15 +128,14 @@ async function runStartupMigration() {
   try {
     await chrome.storage.local.set({ [STORAGE_VERSION_KEY]: CURRENT_STORAGE_VERSION });
   } catch (error) {
-    migrationState.failed = true;
-    logMigrationError("write", STORAGE_VERSION_KEY, error);
+    handleMigrationError("write", STORAGE_VERSION_KEY, error);
   }
 }
 
 const migrationPromise = runStartupMigration();
 
 async function openDashboard(payload) {
-  const dashboardUrl = chrome.runtime.getURL("dashboard/index.html");
+  const dashboardUrl = chrome.runtime.getURL("dashboard/dashboard.html");
   const tabs = await chrome.tabs.query({ url: dashboardUrl });
   const existingTab = tabs[0];
 
@@ -82,6 +152,34 @@ async function openDashboard(payload) {
   }
 
   return { ok: true, data: null };
+}
+
+async function openQuickAccess(payload) {
+  const quickAccessUrl = chrome.runtime.getURL("quick-access/quick-access.html");
+  const existingTabs = await chrome.tabs.query({ url: quickAccessUrl });
+  const existingTab = existingTabs[0];
+
+  if (existingTab && payload?.focusExisting !== false) {
+    if (typeof existingTab.id === "number") {
+      await chrome.tabs.update(existingTab.id, { active: true });
+    }
+
+    if (typeof existingTab.windowId === "number") {
+      await chrome.windows.update(existingTab.windowId, { focused: true });
+    }
+
+    return { ok: true, data: { reused: true } };
+  }
+
+  await chrome.windows.create({
+    url: quickAccessUrl,
+    type: "popup",
+    width: QUICK_ACCESS_WINDOW_WIDTH,
+    height: QUICK_ACCESS_WINDOW_HEIGHT,
+    focused: true,
+  });
+
+  return { ok: true, data: { reused: false } };
 }
 
 async function getTemplates(payload) {
@@ -102,7 +200,10 @@ async function getTemplates(payload) {
   }
 
   if (payload && Object.prototype.hasOwnProperty.call(payload, "folderId")) {
-    templates = templates.filter((template) => template.folderId === payload.folderId);
+    templates = templates.filter((template) => {
+      var folderId = template.folderId || template.folder_id || null;
+      return folderId === payload.folderId;
+    });
   }
 
   const rawQuery = typeof payload?.query === "string" ? payload.query.trim().toLowerCase() : "";
@@ -115,6 +216,41 @@ async function getTemplates(payload) {
   }
 
   return { ok: true, data: templates };
+}
+
+async function getFolders() {
+  var folders = [];
+
+  try {
+    if (typeof MinutarioDB !== "undefined" && MinutarioDB.getAllFolders) {
+      folders = await MinutarioDB.getAllFolders();
+    }
+  } catch (error) {
+    console.error("Failed to get folders:", error);
+  }
+
+  folders.sort(function (a, b) {
+    var orderA = typeof a.order_idx === "number" ? a.order_idx : typeof a.order === "number" ? a.order : 0;
+    var orderB = typeof b.order_idx === "number" ? b.order_idx : typeof b.order === "number" ? b.order : 0;
+
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+
+  return { ok: true, data: folders };
+}
+
+async function getRecent() {
+  try {
+    const stored = await chrome.storage.local.get(RECENT_KEY);
+    const recent = Array.isArray(stored[RECENT_KEY]) ? stored[RECENT_KEY] : [];
+    return { ok: true, data: recent.slice(0, MAX_RECENT) };
+  } catch (error) {
+    return { ok: false, error: error?.message || "Failed to load recent templates" };
+  }
 }
 
 async function updateRecent(payload) {
@@ -136,18 +272,18 @@ async function updateRecent(payload) {
 
 async function performSync() {
   try {
-    const stored = await chrome.storage.local.get("minutario_org_id");
-    const orgId = stored.minutario_org_id;
+    const stored = await chrome.storage.local.get("minutario_user_id");
+    const userId = stored.minutario_user_id;
 
-    if (!orgId) {
-      return { updated: false, error: "No org ID configured" };
+    if (!userId) {
+      return { updated: false, error: "No user ID configured" };
     }
 
     if (typeof MinutarioSync === "undefined" || !MinutarioSync.syncTemplates) {
       return { updated: false, error: "Sync module not available" };
     }
 
-    const result = await MinutarioSync.syncTemplates(orgId);
+    const result = await MinutarioSync.syncTemplates(userId);
 
     if (result.success) {
       const tabs = await chrome.tabs.query({});
@@ -189,6 +325,12 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "open-quick-access") {
+    void openQuickAccess({ focusExisting: true });
+  }
+});
+
 // Message handling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void (async () => {
@@ -205,8 +347,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse(await openDashboard(message.payload));
           return;
         }
+        case "OPEN_QUICK_ACCESS": {
+          sendResponse(await openQuickAccess(message.payload));
+          return;
+        }
         case "GET_TEMPLATES": {
           sendResponse(await getTemplates(message.payload));
+          return;
+        }
+        case "GET_FOLDERS": {
+          sendResponse(await getFolders());
+          return;
+        }
+        case "GET_RECENT": {
+          sendResponse(await getRecent());
           return;
         }
         case "UPDATE_RECENT": {
