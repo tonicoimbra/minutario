@@ -1,3 +1,52 @@
+-- Minutario - Supabase full reset
+-- Drops and recreates the per-user schema from scratch.
+
+-- ============================================================
+-- 0. CLEANUP
+-- ============================================================
+
+-- Triggers depend on tables and the trigger function.
+DO $$
+BEGIN
+    IF to_regclass('public.templates') IS NOT NULL THEN
+        EXECUTE 'DROP TRIGGER IF EXISTS update_templates_updated_at ON public.templates';
+    END IF;
+
+    IF to_regclass('public.folders') IS NOT NULL THEN
+        EXECUTE 'DROP TRIGGER IF EXISTS update_folders_updated_at ON public.folders';
+    END IF;
+END
+$$;
+
+-- Trigger function dropped with CASCADE to handle any dependent triggers on other tables.
+DROP FUNCTION IF EXISTS public.update_updated_at_column() CASCADE;
+
+-- RLS policies depend on their tables.
+DO $$
+BEGIN
+    IF to_regclass('public.folders') IS NOT NULL THEN
+        EXECUTE 'DROP POLICY IF EXISTS folders_select ON public.folders';
+        EXECUTE 'DROP POLICY IF EXISTS folders_insert ON public.folders';
+        EXECUTE 'DROP POLICY IF EXISTS folders_update ON public.folders';
+        EXECUTE 'DROP POLICY IF EXISTS folders_delete ON public.folders';
+    END IF;
+
+    IF to_regclass('public.templates') IS NOT NULL THEN
+        EXECUTE 'DROP POLICY IF EXISTS templates_select ON public.templates';
+        EXECUTE 'DROP POLICY IF EXISTS templates_insert ON public.templates';
+        EXECUTE 'DROP POLICY IF EXISTS templates_update ON public.templates';
+        EXECUTE 'DROP POLICY IF EXISTS templates_delete ON public.templates';
+    END IF;
+END
+$$;
+
+-- templates references folders, so templates must be dropped first.
+DROP TABLE IF EXISTS public.templates;
+DROP TABLE IF EXISTS public.folders;
+
+-- uuid-ossp is only needed after the tables are recreated.
+DROP EXTENSION IF EXISTS "uuid-ossp" CASCADE;
+
 -- Minutário — Supabase Database Schema
 -- Simple per-user template sync (no organizations)
 

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Consulta Rápida de Minutas</title>
+    <link rel="stylesheet" href="./quick-access.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">Consulta rápida</p>
+          <h1>Minutário</h1>
+        </div>
+        <div class="topbar-actions">
+          <button id="open-dashboard" type="button" class="btn btn-secondary" aria-label="Abrir dashboard para editar minutas">
+            Abrir dashboard
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace" aria-label="Consulta rápida de minutas">
+        <section class="sidebar" aria-label="Busca e resultados">
+          <div class="search-panel">
+            <label class="sr-only" for="template-search">Buscar minutas</label>
+            <input
+              id="template-search"
+              type="search"
+              class="search-input"
+              placeholder="Buscar por nome, atalho ou /comando"
+              autocomplete="off"
+              aria-describedby="search-hint"
+            />
+            <p id="search-hint" class="search-hint">
+              Digite para buscar. Use seta para navegar e Enter para copiar.
+            </p>
+          </div>
+
+          <div class="mode-tabs" role="tablist" aria-label="Modos de navegação">
+            <button id="tab-recent" class="mode-tab active" type="button" role="tab" aria-selected="true">
+              Recentes
+            </button>
+            <button id="tab-all" class="mode-tab" type="button" role="tab" aria-selected="false">
+              Todas
+            </button>
+          </div>
+
+          <div class="folder-filters">
+            <div class="folder-filters-header">
+              <span>Pastas</span>
+            </div>
+            <div id="folder-chip-list" class="folder-chip-list" role="list" aria-label="Filtros por pasta"></div>
+          </div>
+
+          <div class="result-summary">
+            <span id="result-count">0 minutas</span>
+            <span id="sync-status" class="sync-status">Cache local</span>
+          </div>
+
+          <div id="results-empty" class="empty-state hidden" aria-live="polite">
+            <h2>Nenhuma minuta encontrada</h2>
+            <p>Ajuste a busca, mude a pasta ou abra o dashboard para cadastrar novas minutas.</p>
+          </div>
+
+          <ul id="result-list" class="result-list" role="listbox" aria-label="Resultados da busca"></ul>
+        </section>
+
+        <section class="preview-panel" aria-label="Pré-visualização da minuta">
+          <div class="preview-header">
+            <div>
+              <p class="preview-label">Pré-visualização</p>
+            </div>
+            <button id="copy-template" type="button" class="btn btn-primary" disabled aria-disabled="true">
+              📋 Copiar
+            </button>
+          </div>
+
+          <div id="preview-empty" class="preview-empty">
+            <h2>Selecione uma minuta</h2>
+            <p>O conteúdo aparecerá aqui para conferência antes de copiar.</p>
+          </div>
+
+          <article id="preview-content" class="preview-content hidden" tabindex="0"></article>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="../shared/config.js"></script>
+    <script src="./quick-access.js"></script>
+  </body>
+</html>

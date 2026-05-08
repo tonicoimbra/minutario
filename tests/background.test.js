@@ -102,6 +102,26 @@ test("marks migration as failed for real storage errors", async () => {
   assert.equal(instance.errors.length, 1);
 });
 
+test("logs storage migration failures as a single useful string", async () => {
+  const instance = loadBackground({
+    get: async function () {
+      throw {
+        message: { text: "Quota exceeded" },
+        code: "QUOTA",
+      };
+    },
+  });
+
+  await instance.api.migrationPromise;
+
+  assert.equal(instance.errors.length, 1);
+  assert.equal(instance.errors[0].length, 1);
+  assert.match(
+    instance.errors[0][0],
+    /Storage migration error step=read key=storageVersion message=\{"message":\{"text":"Quota exceeded"\},"code":"QUOTA"\}/
+  );
+});
+
 test("extracts useful text from plain object exceptions", async () => {
   const instance = loadBackground();
 

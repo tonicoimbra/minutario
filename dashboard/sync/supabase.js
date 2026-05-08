@@ -1,11 +1,15 @@
 (function (global) {
-  var SUPABASE_URL = "https://nvvzcwbriktuhzzzlsnv.supabase.co";
-  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im52dnpjd2JyaWt0dWh6enpsc252Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5OTAwMjgsImV4cCI6MjA5MzU2NjAyOH0.xW_kBoFN3TN3QYd5ee0VfXSrA8vXLt3i4SyLw8CufmM";
+  var _config = global.MinutarioConfig || {};
+  var SUPABASE_URL = _config.SUPABASE_URL || "";
+  var SUPABASE_ANON_KEY = _config.SUPABASE_ANON_KEY || "";
 
   var client = null;
 
   function getClient() {
-    if (!client && global.supabase && global.supabase.createClient) {
+    if (!client && global.MinutarioAPI && typeof global.MinutarioAPI.getClient === "function") {
+      client = global.MinutarioAPI.getClient();
+    }
+    if (!client && SUPABASE_URL && SUPABASE_ANON_KEY && global.supabase && global.supabase.createClient) {
       client = global.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     }
     return client;
@@ -22,6 +26,7 @@
 
   async function signIn(email, password) {
     var sb = getClient();
+    if (!sb) return { success: false, error: "Supabase client not available" };
     var result = await sb.auth.signInWithPassword({ email: email, password: password });
     if (result.error) return { success: false, error: result.error.message };
     return { success: true, session: result.data.session };
@@ -29,6 +34,7 @@
 
   async function signOut() {
     var sb = getClient();
+    if (!sb) return { success: false, error: "Supabase client not available" };
     await sb.auth.signOut();
     client = null;
     return { success: true };
@@ -36,6 +42,7 @@
 
   async function push(templates, folders) {
     var sb = getClient();
+    if (!sb) return { success: false, error: "Supabase client not available" };
     var userResult = await sb.auth.getUser();
     var user = userResult.data && userResult.data.user ? userResult.data.user : null;
     if (!user) return { success: false, error: "Not authenticated" };
@@ -72,6 +79,7 @@
 
   async function pull() {
     var sb = getClient();
+    if (!sb) return { success: false, error: "Supabase client not available" };
     var userResult = await sb.auth.getUser();
     var user = userResult.data && userResult.data.user ? userResult.data.user : null;
     if (!user) return { success: false, error: "Not authenticated" };

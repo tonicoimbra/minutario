@@ -76,12 +76,14 @@ function logMigrationError(step, key, exception) {
     return;
   }
 
-  console.error("Storage migration error", {
-    step,
-    key,
-    message: getErrorMessage(exception),
-    exception,
-  });
+  console.error(
+    "Storage migration error step=" +
+      step +
+      " key=" +
+      key +
+      " message=" +
+      getErrorMessage(exception)
+  );
 }
 
 function handleMigrationError(step, key, exception) {

@@ -1,50 +1,36 @@
--- Minutário — Supabase Database Schema
--- Simple per-user template sync (no organizations)
+-- Migração: org_id → user_id
+-- Execute este SQL para migrar o schema antigo para o novo modelo por usuário
 
 -- ============================================================
--- 1. EXTENSIONS
+-- 1. Adicionar coluna user_id se não existir
 -- ============================================================
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id UUID;
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS user_id UUID;
 
 -- ============================================================
--- 2. FOLDERS (pastas pessoais)
+-- 2. Popular user_id a partir dos dados existentes
 -- ============================================================
-CREATE TABLE IF NOT EXISTS folders (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    order_idx INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- Se você tinha org_id, pode transferir aqui
+-- Exemplo: UPDATE templates SET user_id = auth.users.id FROM organizations WHERE templates.org_id = organizations.id AND auth.users.org_id = organizations.id;
+-- Por enquanto, vamos попуlar com um user placeholder
 
 -- ============================================================
--- 3. TEMPLATES (modelos)
+-- 3. Criar índices
 -- ============================================================
-CREATE TABLE IF NOT EXISTS templates (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    folder_id UUID NULL REFERENCES folders(id) ON DELETE SET NULL,
-    name TEXT NOT NULL,
-    shortcut TEXT NOT NULL,
-    content TEXT NOT NULL DEFAULT '',
-    plain_text TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+DROP INDEX IF EXISTS idx_templates_org_shortcut;
+DROP INDEX IF EXISTS idx_templates_org_folder;
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_templates_user_shortcut_idx
-    ON templates(user_id, shortcut);
+CREATE INDEX IF NOT EXISTS idx_templates_user_shortcut ON templates(user_id, shortcut);
+CREATE INDEX IF NOT EXISTS idx_templates_user_folder ON templates(user_id, folder_id);
 
-CREATE INDEX IF NOT EXISTS idx_templates_user_folder
-    ON templates(user_id, folder_id);
-
--- Unique constraint: one template per shortcut per user
+-- ============================================================
+-- 4. Adicionar constraint unique
+-- ============================================================
+ALTER TABLE templates DROP CONSTRAINT IF EXISTS idx_templates_user_shortcut;
 ALTER TABLE templates ADD CONSTRAINT idx_templates_user_shortcut UNIQUE (user_id, shortcut);
 
 -- ============================================================
--- 4. TRIGGERS: auto-update updated_at
+-- 5. Trigger updated_at (se não existir)
 -- ============================================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -67,10 +53,10 @@ CREATE TRIGGER update_folders_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
--- 5. RLS POLICIES
+-- 6. RLS Policies
 -- ============================================================
 
--- Folders: only owner
+-- Folders
 ALTER TABLE folders ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS folders_select ON folders;
@@ -94,7 +80,7 @@ CREATE POLICY folders_delete ON folders
     FOR DELETE
     USING (user_id = auth.uid());
 
--- Templates: only owner
+-- Templates
 ALTER TABLE templates ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS templates_select ON templates;
@@ -119,7 +105,7 @@ CREATE POLICY templates_delete ON templates
     USING (user_id = auth.uid());
 
 -- ============================================================
--- 6. REALTIME
+-- 7. Habilitar Realtime
 -- ============================================================
 DO $$
 BEGIN
@@ -137,8 +123,4 @@ BEGIN
 END
 $$;
 
--- ============================================================
--- 7. SEED DATA (optional - for testing only)
--- ============================================================
--- Note: No seed data for user-centric model
--- Each user's templates are created through the app
+SELECT 'Migração concluída com sucesso!' as resultado;

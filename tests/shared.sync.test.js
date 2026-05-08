@@ -13,16 +13,27 @@ function bootstrap() {
 
   global.MinutarioDB = {
     _templates: [],
+    _folders: [],
     _meta: {},
     getAllTemplates: async function () {
       return this._templates;
+    },
+    getAllFolders: async function () {
+      return this._folders;
     },
     putTemplate: async function (t) {
       this._templates = this._templates.filter(function (x) { return x.id !== t.id; });
       this._templates.push(t);
     },
+    putFolder: async function (folder) {
+      this._folders = this._folders.filter(function (x) { return x.id !== folder.id; });
+      this._folders.push(folder);
+    },
     deleteAllTemplates: async function () {
       this._templates = [];
+    },
+    deleteAllFolders: async function () {
+      this._folders = [];
     },
     setMeta: async function (key, value) {
       this._meta[key] = value;
@@ -34,6 +45,7 @@ function bootstrap() {
 
   global.MinutarioAPI = {
     _templates: [],
+    _folders: [],
     getTemplates: async function (orgId, options) {
       options = options || {};
       if (options.since) {
@@ -42,6 +54,9 @@ function bootstrap() {
         });
       }
       return this._templates;
+    },
+    getFolders: async function () {
+      return this._folders;
     },
   };
 

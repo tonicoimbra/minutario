@@ -6,6 +6,10 @@
   var reloadTimer = null;
   var debugEnabled = !!(global.MinutarioConfig && global.MinutarioConfig.DEBUG_LOGS);
   var WORD_PROBE_STORAGE_KEY = "minutario_last_word_probe";
+  var WORD_PROBE_TRAIL_LIMIT = 24;
+  var WORD_SELECTION_SYNC_DELAY_MS = 60;
+  var wordProbeTrail = [];
+  var lastDeleteInfo = null;
 
   function debugLog(message, details) {
     if (!debugEnabled || !global.console || typeof global.console.debug !== "function") {
@@ -48,6 +52,75 @@
     var text = String(value || "");
     var max = typeof limit === "number" ? limit : 240;
     return text.length > max ? text.slice(0, max) + "..." : text;
+  }
+
+  function safeRangeText(range) {
+    try {
+      return range ? shortText(range.toString(), 300) : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function safeSelectionText(doc) {
+    try {
+      var selection = doc && doc.getSelection ? doc.getSelection() : null;
+      return selection ? shortText(selection.toString(), 300) : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function safeRootText(root) {
+    try {
+      return root ? shortText(root.innerText || root.textContent || "", 500) : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function rootContainsText(root, text) {
+    try {
+      return !!(root && text && (root.innerText || root.textContent || "").indexOf(text) !== -1);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function describeProbeNode(node) {
+    if (!node) {
+      return "";
+    }
+
+    if (node.nodeType === 3) {
+      return '#text("' + shortText(node.nodeValue || "", 80) + '")';
+    }
+
+    if (node.nodeType !== 1) {
+      return "nodeType:" + node.nodeType;
+    }
+
+    var label = node.tagName || "ELEMENT";
+    if (node.id) {
+      label += "#" + node.id;
+    }
+    if (node.className) {
+      label += "." + shortText(String(node.className).replace(/\s+/g, "."), 80);
+    }
+    return label;
+  }
+
+  function appendWordProbeTrail(entry) {
+    if (!entry) {
+      return wordProbeTrail.slice();
+    }
+
+    wordProbeTrail.push(entry);
+    if (wordProbeTrail.length > WORD_PROBE_TRAIL_LIMIT) {
+      wordProbeTrail = wordProbeTrail.slice(wordProbeTrail.length - WORD_PROBE_TRAIL_LIMIT);
+    }
+
+    return wordProbeTrail.slice();
   }
 
   function getDocumentProbeContext(doc) {
@@ -185,15 +258,22 @@
       return;
     }
 
+    var capturedAt = new Date().toISOString();
+    var diagnostics = collectEditorDiagnostics(doc, expectedText, replacementText);
     var probe = {
       phase: phase,
-      capturedAt: new Date().toISOString(),
+      capturedAt: capturedAt,
       url: doc && doc.URL ? doc.URL : "",
       referrer: doc && doc.referrer ? doc.referrer : "",
-      diagnostics: collectEditorDiagnostics(doc, expectedText, replacementText),
+      diagnostics: diagnostics,
+      trail: appendWordProbeTrail({
+        phase: phase,
+        capturedAt: capturedAt,
+        type: "diagnostics",
+      }),
     };
 
-    if (global.console && typeof global.console.info === "function") {
+    if (debugEnabled && global.console && typeof global.console.info === "function") {
       global.console.info("[Minutário Probe]", phase, probe);
     }
 
@@ -218,15 +298,22 @@
       return;
     }
 
+    var capturedAt = new Date().toISOString();
     var probe = {
       phase: phase,
-      capturedAt: new Date().toISOString(),
+      capturedAt: capturedAt,
       url: doc && doc.URL ? doc.URL : "",
       referrer: doc && doc.referrer ? doc.referrer : "",
       details: details || {},
+      trail: appendWordProbeTrail({
+        phase: phase,
+        capturedAt: capturedAt,
+        type: "decision",
+        details: details || {},
+      }),
     };
 
-    if (global.console && typeof global.console.info === "function") {
+    if (debugEnabled && global.console && typeof global.console.info === "function") {
       global.console.info("[Minutário Probe]", phase, probe);
     }
 
@@ -1289,12 +1376,191 @@
     return selection.getRangeAt(0);
   }
 
-  function deleteRangeForInsertion(doc, range) {
+  function createCollapsedInsertionRange(doc, root, startOffset) {
+    var insertionRange = null;
+
+    if (root && root.isConnected && typeof startOffset === "number" && startOffset >= 0) {
+      var rootLength = (root.textContent || "").length;
+      var safeOffset = Math.max(0, Math.min(startOffset, rootLength));
+      insertionRange = createRangeFromTextOffsets(doc, root, safeOffset, safeOffset);
+    }
+
+    if (!insertionRange) {
+      insertionRange = getSelectedRange(doc);
+    }
+
+    if (!insertionRange) {
+      var target = doc.activeElement || root || doc.body || doc.documentElement;
+      if (target && target.nodeType === 1) {
+        try {
+          insertionRange = doc.createRange();
+          insertionRange.selectNodeContents(target);
+          insertionRange.collapse(false);
+        } catch (fallbackError) {
+          insertionRange = null;
+        }
+      }
+    }
+
+    if (insertionRange) {
+      insertionRange.collapse(true);
+      selectRange(doc, insertionRange);
+    }
+
+    return insertionRange;
+  }
+
+  function insertHtmlWithEditingCommand(doc, range, html, plainText) {
+    if (!doc || !range || typeof doc.execCommand !== "function") {
+      return false;
+    }
+
+    selectRange(doc, range);
+
+    // Capture pre-command state so we can verify the shortcut was actually
+    // removed. Word Online sometimes returns true from execCommand without
+    // deleting the selected text.
+    var root = findEditableRoot(range.startContainer);
+    var shortcutText = range.toString ? range.toString() : "";
+    var expectedWasPresent = root ? rootContainsText(root, shortcutText) : false;
+
+    try {
+      if (plainText && doc.execCommand("insertText", false, plainText) === true) {
+        var textAfterTextCmd = root ? (root.textContent || "") : "";
+        var shortcutStillPresent = expectedWasPresent && textAfterTextCmd.indexOf(shortcutText) !== -1;
+        if (!shortcutStillPresent) {
+          return true;
+        }
+        // execCommand returned true but shortcut still present — fall through.
+      }
+    } catch (textCommandError) {
+      // Fall through to HTML command.
+    }
+
+    try {
+      if (html && doc.execCommand("insertHTML", false, html) === true) {
+        var textAfterHtmlCmd = root ? (root.textContent || "") : "";
+        var shortcutStillPresentHtml = expectedWasPresent && textAfterHtmlCmd.indexOf(shortcutText) !== -1;
+        if (!shortcutStillPresentHtml) {
+          return true;
+        }
+        // execCommand returned true but shortcut still present — fall through.
+      }
+    } catch (htmlCommandError) {
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
+   * Dispatches beforeinput/input events so Word Online's virtual document
+   * model registers the mutation as a legitimate user edit. Without this,
+   * Word may re-hydrate the deleted shortcut on the next reconciliation
+   * cycle because its internal model never saw the deletion.
+   */
+  function notifyWordInputEvents(doc, target, inputType, data) {
+    if (!doc || !target) {
+      return;
+    }
+
+    var editableRoot = target || doc.activeElement || doc.body;
+    var eventData = inputType === "insertText" ? (data || "") : null;
+
+    var beforeEvent = null;
+    try {
+      beforeEvent = new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: inputType,
+        data: eventData,
+        isComposing: false,
+      });
+    } catch (beforeInputCtorError) {
+      // InputEvent constructor not available in this context.
+    }
+
+    if (beforeEvent) {
+      editableRoot.dispatchEvent(beforeEvent);
+
+      if (!beforeEvent.defaultPrevented) {
+        try {
+          var inputEvent = new InputEvent("input", {
+            bubbles: true,
+            cancelable: false,
+            inputType: inputType,
+            data: eventData,
+            isComposing: false,
+          });
+          editableRoot.dispatchEvent(inputEvent);
+        } catch (inputCtorError) {
+          // Ignore.
+        }
+      }
+    }
+  }
+
+  function waitForWordSelectionSync() {
+    if (typeof global.setTimeout !== "function") {
+      return Promise.resolve();
+    }
+
+    return new Promise(function(resolve) {
+      global.setTimeout(resolve, WORD_SELECTION_SYNC_DELAY_MS);
+    });
+  }
+
+  function deleteRangeForInsertion(doc, range, expectedText) {
     if (!doc || !range) {
       return null;
     }
 
+    var root = findEditableRoot(range.startContainer) || findEditableRoot(range.commonAncestorContainer);
+    var startOffset = root
+      ? getTextOffsetWithinRoot(doc, root, range.startContainer, range.startOffset)
+      : -1;
+    var expectedWasPresent = rootContainsText(root, expectedText);
+
+    lastDeleteInfo = {
+      hostCommandAttempted: false,
+      hostCommandSucceeded: false,
+      hostCommandRemovedExpected: false,
+      domFallbackUsed: false,
+    };
+
     try {
+      selectRange(doc, range);
+
+      // WORD ONLINE: execCommand('delete') is intercepted by Word's editing
+      // engine and behaves unreliably. Skip it and go straight to the DOM
+      // fallback, which is faster and more predictable.
+      if (isWordOnlineDocument(doc)) {
+        lastDeleteInfo.domFallbackUsed = true;
+        range.deleteContents();
+        range.collapse(true);
+        selectRange(doc, range);
+        return range;
+      }
+
+      if (typeof doc.execCommand === "function") {
+        lastDeleteInfo.hostCommandAttempted = true;
+        try {
+          lastDeleteInfo.hostCommandSucceeded = doc.execCommand("delete", false, null) === true;
+        } catch (commandError) {
+          lastDeleteInfo.hostCommandSucceeded = false;
+        }
+      }
+
+      if (lastDeleteInfo.hostCommandSucceeded) {
+        lastDeleteInfo.hostCommandRemovedExpected =
+          !expectedText || !expectedWasPresent || !rootContainsText(root, expectedText);
+
+        if (lastDeleteInfo.hostCommandRemovedExpected) {
+          return createCollapsedInsertionRange(doc, root, startOffset);
+        }
+      }
+
+      lastDeleteInfo.domFallbackUsed = true;
       range.deleteContents();
       range.collapse(true);
       selectRange(doc, range);
@@ -1537,8 +1803,104 @@
       return false;
     });
 
+    if (isWordOnlineDocument(doc)) {
+      selectRange(doc, range);
+      logWordDecision(doc, "word-edit-command-insert-attempt", {
+        expectedText: expectedText || "",
+        selectedText: safeSelectionText(doc),
+        rootText: safeRootText(shortcutContext && shortcutContext.root),
+      });
+
+      await waitForWordSelectionSync();
+
+      var wordEditCommandHandled = insertHtmlWithEditingCommand(
+        doc,
+        range.cloneRange(),
+        html,
+        plainText
+      );
+      var wordEditCommandSelectedText = safeSelectionText(doc);
+      var wordEditCommandRootText = safeRootText(shortcutContext && shortcutContext.root);
+      var wordEditCommandRootContainsExpected = rootContainsText(
+        shortcutContext && shortcutContext.root,
+        expectedText
+      );
+
+      if (wordEditCommandHandled) {
+        cleanupResidualShortcut(doc, shortcutContext, expectedText);
+      }
+
+      logWordDecision(doc, "word-edit-command-insert-result", {
+        expectedText: expectedText || "",
+        handled: wordEditCommandHandled,
+        selectedText: safeSelectionText(doc),
+        selectedTextBeforeCleanup: wordEditCommandSelectedText,
+        rootText: safeRootText(shortcutContext && shortcutContext.root),
+        rootTextBeforeCleanup: wordEditCommandRootText,
+        rootContainsExpected: rootContainsText(
+          shortcutContext && shortcutContext.root,
+          expectedText
+        ),
+        rootContainsExpectedBeforeCleanup: wordEditCommandRootContainsExpected,
+      });
+
+      if (wordEditCommandHandled) {
+        // CRITICAL: Word Online’s virtual document model ignores DOM mutations
+        // that are not accompanied by beforeinput/input events. Without this,
+        // the insertion is visible to our probes but may never be rendered to
+        // the user (or is reverted on the next reconciliation cycle).
+        notifyWordInputEvents(
+          doc,
+          shortcutContext && shortcutContext.root,
+          html ? "insertHTML" : "insertText",
+          html || plainText
+        );
+        scheduleResidualShortcutCleanup(doc, shortcutContext, expectedText);
+        scheduleWordProbeSnapshots(doc, expectedText, plainText);
+        return true;
+      }
+
+      logWordDecision(doc, "word-edit-command-fallback-to-paste", {
+        expectedText: expectedText || "",
+        selectedText: safeSelectionText(doc),
+        rootText: safeRootText(shortcutContext && shortcutContext.root),
+      });
+    }
+
     logWordProbe(doc, "before-shortcut-delete", expectedText, plainText);
-    var insertionRange = deleteRangeForInsertion(doc, range);
+    var beforeDeleteDetails = {
+      expectedText: expectedText || "",
+      beforeRangeText: safeRangeText(range),
+      beforeSelectionText: safeSelectionText(doc),
+      beforeRootText: safeRootText(shortcutContext && shortcutContext.root),
+      beforeRootContainsExpected: rootContainsText(
+        shortcutContext && shortcutContext.root,
+        expectedText
+      ),
+      rootConnected: !!(shortcutContext && shortcutContext.root && shortcutContext.root.isConnected),
+      rangeStart: describeProbeNode(range.startContainer),
+      rangeEnd: describeProbeNode(range.endContainer),
+    };
+    var insertionRange = deleteRangeForInsertion(doc, range, expectedText);
+    logWordDecision(doc, "shortcut-delete-result", {
+      expectedText: beforeDeleteDetails.expectedText,
+      beforeRangeText: beforeDeleteDetails.beforeRangeText,
+      afterRangeText: safeRangeText(insertionRange),
+      beforeSelectionText: beforeDeleteDetails.beforeSelectionText,
+      afterSelectionText: safeSelectionText(doc),
+      beforeRootText: beforeDeleteDetails.beforeRootText,
+      afterRootText: safeRootText(shortcutContext && shortcutContext.root),
+      beforeRootContainsExpected: beforeDeleteDetails.beforeRootContainsExpected,
+      afterRootContainsExpected: rootContainsText(
+        shortcutContext && shortcutContext.root,
+        expectedText
+      ),
+      rootConnected: !!(shortcutContext && shortcutContext.root && shortcutContext.root.isConnected),
+      deleteReturnedRange: !!insertionRange,
+      deleteInfo: lastDeleteInfo,
+      rangeStart: beforeDeleteDetails.rangeStart,
+      rangeEnd: beforeDeleteDetails.rangeEnd,
+    });
     if (!insertionRange) {
       return false;
     }
@@ -1561,6 +1923,47 @@
 
   function insertHtmlWithRange(doc, range, html, plainText) {
     if (!doc || !range) {
+      return false;
+    }
+
+    // WORD ONLINE ATOMIC PATH:
+    // Delete + insert in a single synchronous block so Word's virtual model
+    // sees one coherent mutation. Then fire beforeinput/input so Word
+    // registers the change in its undo history and does not re-hydrate.
+    if (isWordOnlineDocument(doc)) {
+      var wordRoot = findEditableRoot(range.startContainer);
+      range.deleteContents();
+
+      var wordInsertedNodes = [];
+      var wordFragment = doc.createDocumentFragment();
+
+      if (html) {
+        var wordContainer = doc.createElement("div");
+        wordContainer.innerHTML = html;
+        while (wordContainer.firstChild) {
+          wordInsertedNodes.push(wordContainer.firstChild);
+          wordFragment.appendChild(wordContainer.firstChild);
+        }
+      } else if (plainText) {
+        var wordTextNode = doc.createTextNode(plainText);
+        wordInsertedNodes.push(wordTextNode);
+        wordFragment.appendChild(wordTextNode);
+      }
+
+      if (wordFragment.childNodes.length > 0) {
+        range.insertNode(wordFragment);
+        notifyWordInputEvents(
+          doc,
+          wordRoot,
+          html ? "insertHTML" : "insertText",
+          html || plainText
+        );
+        if (wordInsertedNodes.length > 0) {
+          placeCaretAtEndOfInsertedNodes(doc, wordInsertedNodes);
+        }
+        return true;
+      }
+
       return false;
     }
 

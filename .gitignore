@@ -7,3 +7,6 @@ refs/
 .DS_Store
 *.log
 npm-debug.log*
+
+# Supabase credentials (use config.example.js as template)
+shared/config.js

@@ -1,11 +1,74 @@
 document.addEventListener("DOMContentLoaded", function () {
   var loginForm = document.getElementById("login-form");
+  var openQuickAccessBtn = document.getElementById("open-quick-access");
   var openDashboardBtn = document.getElementById("open-dashboard");
   var forceSyncBtn = document.getElementById("force-sync");
+  var copyWordProbeBtn = document.getElementById("copy-word-probe");
   var logoutBtn = document.getElementById("logout");
+  var toggleAuthBtn = document.getElementById("toggle-auth-mode");
+  var backToLoginBtn = document.getElementById("back-to-login");
 
   if (loginForm) {
     loginForm.addEventListener("submit", handleLogin);
+  }
+
+  if (backToLoginBtn) {
+    backToLoginBtn.addEventListener("click", function() {
+      var loginSection = document.getElementById("login-section");
+      var confirmationSection = document.getElementById("confirmation-section");
+      if (confirmationSection) confirmationSection.classList.add("hidden");
+      if (loginSection) loginSection.classList.remove("hidden");
+
+      loginForm.dataset.mode = "login";
+      var loginBtn = document.getElementById("login-btn");
+      if (loginBtn) loginBtn.textContent = "Entrar";
+      if (toggleAuthBtn) toggleAuthBtn.textContent = "Não tem conta? Criar agora";
+
+      var confirmPwd = document.getElementById("login-password-confirm");
+      if (confirmPwd) {
+        confirmPwd.classList.add("hidden");
+        confirmPwd.removeAttribute("required");
+        confirmPwd.value = "";
+      }
+      var pwd = document.getElementById("login-password");
+      if (pwd) pwd.value = "";
+    });
+  }
+
+  if (toggleAuthBtn) {
+    toggleAuthBtn.addEventListener("click", function(e) {
+      e.preventDefault();
+      var isSignUp = loginForm.dataset.mode === "signup";
+      var loginBtn = document.getElementById("login-btn");
+      var errorEl = document.getElementById("login-error");
+      var confirmPwd = document.getElementById("login-password-confirm");
+
+      if (isSignUp) {
+        loginForm.dataset.mode = "login";
+        loginBtn.textContent = "Entrar";
+        toggleAuthBtn.textContent = "Não tem conta? Criar agora";
+        if (confirmPwd) {
+          confirmPwd.classList.add("hidden");
+          confirmPwd.removeAttribute("required");
+        }
+      } else {
+        loginForm.dataset.mode = "signup";
+        loginBtn.textContent = "Criar Conta";
+        toggleAuthBtn.textContent = "Já tem uma conta? Entrar";
+        if (confirmPwd) {
+          confirmPwd.classList.remove("hidden");
+          confirmPwd.setAttribute("required", "true");
+        }
+      }
+      if (errorEl) {
+        errorEl.textContent = "";
+        errorEl.style.color = "";
+      }
+    });
+  }
+
+  if (openQuickAccessBtn) {
+    openQuickAccessBtn.addEventListener("click", openQuickAccess);
   }
 
   if (openDashboardBtn) {
@@ -14,6 +77,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
   if (forceSyncBtn) {
     forceSyncBtn.addEventListener("click", forceSync);
+  }
+
+  if (copyWordProbeBtn) {
+    copyWordProbeBtn.addEventListener("click", copyWordProbe);
   }
 
   if (logoutBtn) {
@@ -40,21 +107,30 @@ function clearTokens() {
   localStorage.removeItem("minutario_refresh_token");
 }
 
+function shouldFallbackToLogin(signUpError) {
+  var message = signUpError && signUpError.message ? String(signUpError.message) : "";
+  return /user already registered/i.test(message);
+}
+
 function showLogin() {
   var loginSection = document.getElementById("login-section");
   var dashboardSection = document.getElementById("dashboard-section");
+  var confirmationSection = document.getElementById("confirmation-section");
   if (loginSection) loginSection.classList.remove("hidden");
   if (dashboardSection) dashboardSection.classList.add("hidden");
+  if (confirmationSection) confirmationSection.classList.add("hidden");
 }
 
 function showDashboard(user) {
   var loginSection = document.getElementById("login-section");
   var dashboardSection = document.getElementById("dashboard-section");
+  var confirmationSection = document.getElementById("confirmation-section");
   var userEmailEl = document.getElementById("user-email");
   var recentList = document.getElementById("recent-list");
 
   if (loginSection) loginSection.classList.add("hidden");
   if (dashboardSection) dashboardSection.classList.remove("hidden");
+  if (confirmationSection) confirmationSection.classList.add("hidden");
 
   if (userEmailEl) {
     userEmailEl.textContent = user && user.email ? user.email : "Usuário";
@@ -65,6 +141,16 @@ function showDashboard(user) {
   }
 
   updateSyncStatus();
+}
+
+function setWordProbeStatus(message, isError) {
+  var statusEl = document.getElementById("word-probe-status");
+  if (!statusEl) {
+    return;
+  }
+
+  statusEl.textContent = message || "";
+  statusEl.style.color = isError ? "#dc2626" : "";
 }
 
 async function checkAuth() {
@@ -101,6 +187,7 @@ async function handleLogin(event) {
   var email = document.getElementById("login-email").value.trim();
   var password = document.getElementById("login-password").value;
   var errorEl = document.getElementById("login-error");
+  var isSignUp = document.getElementById("login-form").dataset.mode === "signup";
 
   try {
     var client = window.MinutarioAPI.getClient();
@@ -108,12 +195,45 @@ async function handleLogin(event) {
       throw new Error("Cliente Supabase não disponível");
     }
 
-    var result = await client.auth.signInWithPassword({
-      email: email,
-      password: password,
-    });
-    if (result.error) {
-      throw result.error;
+    var result;
+    if (isSignUp) {
+      var confirmPwd = document.getElementById("login-password-confirm").value;
+      if (password.length < 8) {
+        throw new Error("A senha deve ter pelo menos 8 caracteres");
+      }
+      if (password !== confirmPwd) {
+        throw new Error("As senhas não coincidem");
+      }
+
+      result = await client.auth.signUp({
+        email: email,
+        password: password,
+      });
+      if (result.error) {
+        if (shouldFallbackToLogin(result.error)) {
+          result = await client.auth.signInWithPassword({
+            email: email,
+            password: password,
+          });
+        } else {
+          throw result.error;
+        }
+      }
+      if (result.error) throw result.error;
+
+      if (!result.data.session) {
+        var loginSection = document.getElementById("login-section");
+        var confirmationSection = document.getElementById("confirmation-section");
+        if (loginSection) loginSection.classList.add("hidden");
+        if (confirmationSection) confirmationSection.classList.remove("hidden");
+        return;
+      }
+    } else {
+      result = await client.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
+      if (result.error) throw result.error;
     }
 
     var session = result.data.session;
@@ -125,9 +245,9 @@ async function handleLogin(event) {
 
     saveTokens(session);
 
-    var orgId = user && user.user_metadata ? user.user_metadata.org_id : null;
-    if (orgId) {
-      await chrome.storage.local.set({ minutario_org_id: orgId });
+    var userId = user && user.id ? user.id : null;
+    if (userId) {
+      await chrome.storage.local.set({ minutario_user_id: userId });
     }
 
     if (errorEl) errorEl.textContent = "";
@@ -148,12 +268,19 @@ async function handleLogout() {
   }
 
   clearTokens();
-  await chrome.storage.local.remove("minutario_org_id");
+  await chrome.storage.local.remove("minutario_user_id");
   showLogin();
 }
 
+function openQuickAccess() {
+  chrome.runtime.sendMessage({
+    type: "OPEN_QUICK_ACCESS",
+    payload: { focusExisting: true },
+  });
+}
+
 function openDashboard() {
-  var url = chrome.runtime.getURL("dashboard/index.html");
+  var url = chrome.runtime.getURL("dashboard/dashboard.html");
   chrome.tabs.create({ url: url });
 }
 
@@ -175,6 +302,33 @@ async function forceSync() {
     }
   } catch (err) {
     if (statusEl) statusEl.textContent = "Erro na sincronização";
+  }
+}
+
+async function copyWordProbe() {
+  try {
+    var stored = await chrome.storage.local.get("minutario_last_word_probe");
+    var probe = stored && stored.minutario_last_word_probe;
+
+    if (!probe) {
+      setWordProbeStatus("Nenhum diagnóstico do Word salvo ainda.", true);
+      return;
+    }
+
+    var serialized = JSON.stringify(probe, null, 2);
+
+    if (
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function"
+    ) {
+      await navigator.clipboard.writeText(serialized);
+      setWordProbeStatus("Diagnóstico copiado.");
+      return;
+    }
+
+    setWordProbeStatus("Clipboard indisponível neste popup.", true);
+  } catch (error) {
+    setWordProbeStatus("Falha ao copiar diagnóstico.", true);
   }
 }
 
@@ -210,17 +364,26 @@ async function loadRecentTemplates(container) {
     return;
   }
 
-  var templates = await Promise.all(
-    recent.map(async function (id) {
-      var key = "tpl_" + id;
-      var syncData = await chrome.storage.sync.get(key);
-      return { id: id, template: syncData[key] };
-    })
-  );
+  var allTemplatesResponse;
+  try {
+    allTemplatesResponse = await chrome.runtime.sendMessage({ type: "GET_TEMPLATES", payload: {} });
+  } catch (e) {
+    renderEmptyState(container);
+    return;
+  }
 
-  var validTemplates = templates.filter(function (item) {
-    return item.template && item.template.content;
+  var allTemplates = (allTemplatesResponse && allTemplatesResponse.ok && Array.isArray(allTemplatesResponse.data))
+    ? allTemplatesResponse.data
+    : [];
+
+  var templateById = {};
+  allTemplates.forEach(function (t) {
+    if (t && t.id) templateById[t.id] = t;
   });
+
+  var validTemplates = recent
+    .map(function (id) { return { id: id, template: templateById[id] }; })
+    .filter(function (item) { return item.template && item.template.content; });
 
   if (validTemplates.length === 0) {
     renderEmptyState(container);
@@ -254,9 +417,7 @@ async function loadRecentTemplates(container) {
 }
 
 async function copyTemplateById(id, button, initialTemplate) {
-  var key = "tpl_" + id;
-  var syncData = await chrome.storage.sync.get(key);
-  var template = syncData[key] || initialTemplate;
+  var template = initialTemplate;
 
   if (!template || !template.content) {
     return;

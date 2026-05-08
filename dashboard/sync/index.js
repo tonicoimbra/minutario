@@ -1,23 +1,25 @@
 (function (global) {
+  var DB = global.MinutarioDB;
+
   var SyncManager = {
     csv: global.CsvSync,
-    drive: global.DriveSync,
     supabase: global.SupabaseSync,
 
     async syncAll(source) {
       switch (source) {
-        case "drive":
-          return await this.drive.backup(await chrome.storage.sync.get(null));
         case "supabase":
-          var all = await chrome.storage.sync.get(null);
+          if (!DB || !DB.getAllTemplates) {
+            return { success: false, error: "Banco local indisponível" };
+          }
+
+          var templateList = await DB.getAllTemplates();
+          var folders = DB.getAllFolders ? await DB.getAllFolders() : [];
           var templates = {};
-          var folders = [];
-          Object.entries(all).forEach(function (_ref) {
-            var key = _ref[0];
-            var value = _ref[1];
-            if (key.startsWith("tpl_")) templates[value.id] = value;
-            if (key === "folders") folders = value;
+
+          templateList.forEach(function (template) {
+            templates[template.id] = template;
           });
+
           return await this.supabase.push(templates, folders);
         default:
           return { success: false, error: "Unknown source" };

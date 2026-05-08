@@ -14,6 +14,11 @@ function bootstrapDom() {
   });
   const { window } = dom;
 
+  window.MinutarioConfig = {
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_ANON_KEY: "anon-key",
+  };
+
   var mockUser = { id: "user-abc" };
   var mockSession = { user: mockUser };
   var db = { templates: [], folders: [] };
@@ -106,4 +111,67 @@ test("SupabaseSync.pull returns templates and folders", async () => {
   assert.equal(result.templates[0].name, "T1");
   assert.equal(result.folders.length, 1);
   assert.equal(result.folders[0].order, 0);
+});
+
+test("SupabaseSync reuses MinutarioAPI client session when available", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    runScripts: "outside-only",
+    pretendToBeVisual: true,
+  });
+  const { window } = dom;
+  const apiClient = {
+    auth: {
+      async getSession() {
+        return { data: { session: { user: { id: "user-api" } } }, error: null };
+      },
+      async getUser() {
+        return { data: { user: { id: "user-api" } }, error: null };
+      },
+      async signOut() {
+        return { error: null };
+      },
+    },
+    from() {
+      return {
+        upsert: async function () {
+          return { error: null };
+        },
+      };
+    },
+  };
+
+  window.MinutarioAPI = {
+    getClient() {
+      return apiClient;
+    },
+  };
+  window.supabase = {
+    createClient: function () {
+      return {
+        auth: {
+          async getSession() {
+            return { data: { session: null }, error: null };
+          },
+          async getUser() {
+            return { data: { user: null }, error: null };
+          },
+        },
+        from() {
+          return {
+            upsert: async function () {
+              return { error: null };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  window.eval(scriptSource);
+
+  const result = await window.SupabaseSync.push({
+    "1": { id: "1", name: "T1", shortcut: "t1", content: "<p>A</p>", createdAt: 1, updatedAt: 2 },
+  }, []);
+
+  assert.equal(result.success, true);
 });

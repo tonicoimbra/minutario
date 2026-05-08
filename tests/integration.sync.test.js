@@ -21,8 +21,8 @@ test("full sync flow: local cache merges with remote templates", async () => {
     async getTemplates() {
       return {
         data: [
-          { id: "1", shortcut: "caso01", content: "new version", updated_at: "2025-01-02T00:00:00Z", org_id: "org1" },
-          { id: "2", shortcut: "caso02", content: "b", updated_at: "2025-01-01T00:00:00Z", org_id: "org1" },
+          { id: "1", shortcut: "caso01", content: "new version", updated_at: "2025-01-02T00:00:00Z", user_id: "user-1" },
+          { id: "2", shortcut: "caso02", content: "b", updated_at: "2025-01-01T00:00:00Z", user_id: "user-1" },
         ],
         error: null,
       };
@@ -66,20 +66,20 @@ test("delta sync: only fetches templates changed since last sync", async () => {
   var lastSync = "2025-01-02T00:00:00Z";
   
   var mockAPI = {
-    async getTemplates(orgId, options) {
+    async getTemplates(userId, options) {
       if (options && options.since) {
         assert.equal(options.since, lastSync);
       }
       return {
         data: [
-          { id: "3", shortcut: "caso03", content: "c", updated_at: "2025-01-03T00:00:00Z", org_id: "org1" }
+          { id: "3", shortcut: "caso03", content: "c", updated_at: "2025-01-03T00:00:00Z", user_id: "user-1" }
         ],
         error: null,
       };
     },
   };
 
-  var result = await mockAPI.getTemplates("org1", { since: lastSync });
+  var result = await mockAPI.getTemplates("user-1", { since: lastSync });
   assert.equal(result.data.length, 1);
   assert.equal(result.data[0].id, "3");
 });

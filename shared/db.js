@@ -1,6 +1,18 @@
 (function (global) {
   var CONFIG = global.MinutarioConfig || {};
 
+  function ensureIndex(store, name, keyPath, options) {
+    if (!store.indexNames || !store.indexNames.contains || !store.indexNames.contains(name)) {
+      store.createIndex(name, keyPath, options);
+    }
+  }
+
+  function deleteIndexIfExists(store, name) {
+    if (store.indexNames && store.indexNames.contains && store.indexNames.contains(name)) {
+      store.deleteIndex(name);
+    }
+  }
+
   function openDatabase() {
     return new Promise(function (resolve, reject) {
       var request = global.indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
@@ -15,15 +27,25 @@
 
       request.onupgradeneeded = function (event) {
         var db = event.target.result;
+        var upgradeTransaction = event.target.transaction;
 
         if (!db.objectStoreNames.contains("templates")) {
           var templatesStore = db.createObjectStore("templates", { keyPath: "id" });
           templatesStore.createIndex("shortcut", "shortcut", { unique: false });
-          templatesStore.createIndex("org_id", "org_id", { unique: false });
+          templatesStore.createIndex("user_id", "user_id", { unique: false });
+        } else if (upgradeTransaction) {
+          var existingTemplatesStore = upgradeTransaction.objectStore("templates");
+          ensureIndex(existingTemplatesStore, "shortcut", "shortcut", { unique: false });
+          deleteIndexIfExists(existingTemplatesStore, "org_id");
+          ensureIndex(existingTemplatesStore, "user_id", "user_id", { unique: false });
         }
 
         if (!db.objectStoreNames.contains("folders")) {
-          db.createObjectStore("folders", { keyPath: "id" });
+          var foldersStore = db.createObjectStore("folders", { keyPath: "id" });
+          foldersStore.createIndex("user_id", "user_id", { unique: false });
+        } else if (upgradeTransaction) {
+          var existingFoldersStore = upgradeTransaction.objectStore("folders");
+          ensureIndex(existingFoldersStore, "user_id", "user_id", { unique: false });
         }
 
         if (!db.objectStoreNames.contains("meta")) {
@@ -65,8 +87,44 @@
     });
   }
 
+  function saveTemplate(template) {
+    return putTemplate(template);
+  }
+
+  function putFolder(folder) {
+    return withStore("folders", "readwrite", function (store) {
+      return new Promise(function (resolve, reject) {
+        var request = store.put(folder);
+        request.onsuccess = function () {
+          resolve(request.result);
+        };
+        request.onerror = function () {
+          reject(request.error);
+        };
+      });
+    });
+  }
+
+  function saveFolder(folder) {
+    return putFolder(folder);
+  }
+
   function getAllTemplates() {
     return withStore("templates", "readonly", function (store) {
+      return new Promise(function (resolve, reject) {
+        var request = store.getAll();
+        request.onsuccess = function () {
+          resolve(request.result || []);
+        };
+        request.onerror = function () {
+          reject(request.error);
+        };
+      });
+    });
+  }
+
+  function getAllFolders() {
+    return withStore("folders", "readonly", function (store) {
       return new Promise(function (resolve, reject) {
         var request = store.getAll();
         request.onsuccess = function () {
@@ -97,6 +155,48 @@
 
   function deleteAllTemplates() {
     return withStore("templates", "readwrite", function (store) {
+      return new Promise(function (resolve, reject) {
+        var request = store.clear();
+        request.onsuccess = function () {
+          resolve();
+        };
+        request.onerror = function () {
+          reject(request.error);
+        };
+      });
+    });
+  }
+
+  function deleteTemplate(id) {
+    return withStore("templates", "readwrite", function (store) {
+      return new Promise(function (resolve, reject) {
+        var request = store.delete(id);
+        request.onsuccess = function () {
+          resolve();
+        };
+        request.onerror = function () {
+          reject(request.error);
+        };
+      });
+    });
+  }
+
+  function deleteFolder(id) {
+    return withStore("folders", "readwrite", function (store) {
+      return new Promise(function (resolve, reject) {
+        var request = store.delete(id);
+        request.onsuccess = function () {
+          resolve();
+        };
+        request.onerror = function () {
+          reject(request.error);
+        };
+      });
+    });
+  }
+
+  function deleteAllFolders() {
+    return withStore("folders", "readwrite", function (store) {
       return new Promise(function (resolve, reject) {
         var request = store.clear();
         request.onsuccess = function () {
@@ -141,9 +241,16 @@
   global.MinutarioDB = {
     open: openDatabase,
     putTemplate: putTemplate,
+    saveTemplate: saveTemplate,
+    putFolder: putFolder,
+    saveFolder: saveFolder,
     getAllTemplates: getAllTemplates,
+    getAllFolders: getAllFolders,
     getTemplateByShortcut: getTemplateByShortcut,
     deleteAllTemplates: deleteAllTemplates,
+    deleteTemplate: deleteTemplate,
+    deleteFolder: deleteFolder,
+    deleteAllFolders: deleteAllFolders,
     setMeta: setMeta,
     getMeta: getMeta,
   };

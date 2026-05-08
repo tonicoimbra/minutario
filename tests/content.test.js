@@ -7,11 +7,17 @@ const { JSDOM } = require("jsdom");
 const scriptPath = path.join(__dirname, "..", "content.js");
 const scriptSource = fs.readFileSync(scriptPath, "utf8");
 
-function bootstrapDom(html) {
-  const dom = new JSDOM(html, {
-    runScripts: "outside-only",
-    pretendToBeVisual: true,
-  });
+function bootstrapDom(html, options) {
+  const dom = new JSDOM(
+    html,
+    Object.assign(
+      {
+        runScripts: "outside-only",
+        pretendToBeVisual: true,
+      },
+      options || {}
+    )
+  );
 
   const { window } = dom;
   const localStorageArea = {};
@@ -45,6 +51,7 @@ function bootstrapDom(html) {
   };
 
   window.eval(scriptSource);
+  dom.localStorageArea = localStorageArea;
   return dom;
 }
 
@@ -552,6 +559,385 @@ test("replaces the typed shortcut when the host paste model only reacts after DO
   assert.equal(expanded, true);
   assert.equal(editor.textContent, "What is Lorem Ipsum?");
   assert.doesNotMatch(editor.textContent, /\/juris/);
+});
+
+test("deletes shortcut through the host editing command before rich paste", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="visual"></div><div id="editor" contenteditable="true">/juris</div></body></html>'
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  const visual = window.document.getElementById("visual");
+  let hostModelText = "/juris ";
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+
+    setData(type, value) {
+      this.data[type] = value;
+    }
+
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+  window.ClipboardItem = FakeClipboardItem;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: async () => {},
+    },
+  });
+
+  window.document.execCommand = (command) => {
+    if (command !== "delete") {
+      return false;
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.toString() !== "/juris") {
+      return false;
+    }
+
+    hostModelText = "";
+    editor.textContent = "";
+    return true;
+  };
+
+  editor.addEventListener("paste", (event) => {
+    event.preventDefault();
+
+    const pastedText = event.clipboardData.getData("text/plain");
+    const pastedHtml = event.clipboardData.getData("text/html");
+    const template = window.document.createElement("template");
+    template.innerHTML = pastedHtml;
+
+    visual.textContent = hostModelText + pastedText;
+    editor.innerHTML = hostModelText;
+    editor.appendChild(template.content.cloneNode(true));
+    placeCaretAtEnd(window, editor);
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/juris",
+    "<strong>este é um exemplo de minuta</strong>",
+    "este é um exemplo de minuta"
+  );
+
+  assert.equal(expanded, true);
+  assert.equal(visual.textContent, "este é um exemplo de minuta");
+  assert.doesNotMatch(visual.textContent, /\/juris/);
+});
+
+test("Word expansion avoids synthetic paste and host delete command", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="visual"></div><div id="editor" contenteditable="true">/juris</div></body></html>',
+    {
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  const visual = window.document.getElementById("visual");
+  let fullDocumentLoaderShown = false;
+  let pasteEventDispatched = false;
+  let hostModelText = "/juris";
+
+  window.document.execCommand = (command, showUI, value) => {
+    if (command === "delete") {
+      fullDocumentLoaderShown = true;
+      return true;
+    }
+    if (command === "insertHTML") {
+      const template = window.document.createElement("template");
+      template.innerHTML = value || "";
+      hostModelText = template.content.textContent || "";
+      editor.innerHTML = value || "";
+      placeCaretAtEnd(window, editor);
+      return true;
+    }
+    return false;
+  };
+
+  editor.addEventListener("paste", (event) => {
+    event.preventDefault();
+    pasteEventDispatched = true;
+    fullDocumentLoaderShown = true;
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/juris",
+    "<strong>este é um exemplo de minuta</strong>",
+    "este é um exemplo de minuta"
+  );
+
+  window.setTimeout(() => {
+    editor.textContent = hostModelText;
+    placeCaretAtEnd(window, editor);
+  }, 20);
+
+  await new Promise((resolve) => window.setTimeout(resolve, 40));
+
+  assert.equal(expanded, true);
+  visual.textContent = editor.textContent;
+  assert.equal(visual.textContent, "este é um exemplo de minuta");
+  assert.equal(pasteEventDispatched, false);
+  assert.equal(fullDocumentLoaderShown, false);
+  assert.doesNotMatch(visual.textContent, /\/juris/);
+});
+
+test("Word expansion waits for host selection sync before plain text command", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/multa</div></body></html>',
+    {
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  const commands = [];
+  const plainText = "este é um exemplo de multa";
+  let hostModelText = "/multa";
+  let selectionReady = false;
+  Promise.resolve().then(() => {
+    selectionReady = true;
+  });
+
+  window.document.execCommand = (command, showUI, value) => {
+    commands.push(command);
+
+    if (command === "insertHTML") {
+      const template = window.document.createElement("template");
+      template.innerHTML = value || "";
+      hostModelText += template.content.textContent || "";
+      editor.textContent = hostModelText;
+      placeCaretAtEnd(window, editor);
+      return true;
+    }
+
+    if (command === "insertText") {
+      hostModelText = selectionReady ? value || "" : hostModelText + (value || "");
+      editor.textContent = hostModelText;
+      placeCaretAtEnd(window, editor);
+      return true;
+    }
+
+    if (command === "delete") {
+      throw new Error("Word path must not use host delete");
+    }
+
+    return false;
+  };
+
+  editor.addEventListener("paste", () => {
+    throw new Error("Word path must not dispatch synthetic paste");
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/multa",
+    "<strong>este é um exemplo de multa</strong>",
+    plainText
+  );
+
+  window.setTimeout(() => {
+    editor.textContent = hostModelText;
+    placeCaretAtEnd(window, editor);
+  }, 0);
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(expanded, true);
+  assert.equal(commands[0], "insertText");
+  assert.equal(editor.textContent, plainText);
+  assert.doesNotMatch(editor.textContent, /\/multa/);
+});
+
+test("Word expansion defers host edit command until after selection can settle", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/juris</div></body></html>',
+    {
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  const commands = [];
+
+  window.document.execCommand = (command, showUI, value) => {
+    commands.push(command);
+    if (command !== "insertText") {
+      return false;
+    }
+    editor.textContent = value || "";
+    placeCaretAtEnd(window, editor);
+    return true;
+  };
+
+  placeCaretAtEnd(window, editor);
+
+  const expansionPromise = window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/juris",
+    "<strong>este é um exemplo de minuta</strong>",
+    "este é um exemplo de minuta"
+  );
+
+  assert.deepEqual(commands, []);
+
+  const expanded = await expansionPromise;
+
+  assert.equal(expanded, true);
+  assert.deepEqual(commands, ["insertText"]);
+  assert.equal(editor.textContent, "este é um exemplo de minuta");
+});
+
+test("Word expansion falls back to rich paste when host edit command is unavailable", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/juris</div></body></html>',
+    {
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  let pasteEventDispatched = false;
+  let hostDeleteAttempted = false;
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+
+    setData(type, value) {
+      this.data[type] = value;
+    }
+
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+  window.ClipboardItem = FakeClipboardItem;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: async () => {},
+    },
+  });
+
+  window.document.execCommand = (command) => {
+    if (command === "delete") {
+      hostDeleteAttempted = true;
+    }
+    return false;
+  };
+
+  editor.addEventListener("paste", (event) => {
+    event.preventDefault();
+    pasteEventDispatched = true;
+
+    const selection = window.getSelection();
+    const range = selection.getRangeAt(0);
+    const template = window.document.createElement("template");
+    template.innerHTML = event.clipboardData.getData("text/html");
+
+    range.deleteContents();
+    range.insertNode(template.content.cloneNode(true));
+    placeCaretAtEnd(window, editor);
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/juris",
+    "<strong>este é um exemplo de minuta</strong>",
+    "este é um exemplo de minuta"
+  );
+
+  assert.equal(expanded, true);
+  assert.equal(pasteEventDispatched, true);
+  assert.equal(hostDeleteAttempted, false);
+  assert.equal(editor.textContent, "este é um exemplo de minuta");
+  assert.doesNotMatch(editor.textContent, /\/juris/);
+});
+
+test("persists Word probe without console output when debug logs are disabled", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/juris</div></body></html>',
+    {
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  let infoCalls = 0;
+
+  window.console.info = function () {
+    infoCalls += 1;
+  };
+
+  placeCaretAtEnd(window, editor);
+
+  const expanded = await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/juris",
+    "<strong>este é um exemplo de minuta</strong>",
+    "este é um exemplo de minuta"
+  );
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(expanded, true);
+  assert.equal(infoCalls, 0);
+  assert.ok(dom.localStorageArea.minutario_last_word_probe);
 });
 
 test("replaces the typed shortcut inside a Word surface root that is not contenteditable", async () => {
@@ -1543,6 +1929,245 @@ test("persists Word probe data for about:blank documents when the referrer is Wo
   assert.ok(localStorageArea.minutario_last_word_probe);
   assert.match(localStorageArea.minutario_last_word_probe.url, /about:blank/);
   assert.match(localStorageArea.minutario_last_word_probe.referrer, /wordeditorframe\.aspx/i);
+});
+
+test("persists Word probe trail with edit command insert evidence", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/juris</div></body></html>',
+    {
+      runScripts: "outside-only",
+      pretendToBeVisual: true,
+      url: "about:blank",
+      referrer: "https://wordeditorframe.aspx/?WOPIsrc=test",
+    }
+  );
+  const { window } = dom;
+  const localStorageArea = {};
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+
+    setData(type, value) {
+      this.data[type] = value;
+    }
+
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+  window.ClipboardItem = FakeClipboardItem;
+  window.document.execCommand = (command, showUI, value) => {
+    if (command !== "insertHTML") {
+      return false;
+    }
+
+    const selection = window.getSelection();
+    const range = selection.getRangeAt(0);
+    const template = window.document.createElement("template");
+    template.innerHTML = value || "";
+    range.deleteContents();
+    range.insertNode(template.content.cloneNode(true));
+    placeCaretAtEnd(window, window.document.getElementById("editor"));
+    return true;
+  };
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: async () => {},
+    },
+  });
+
+  window.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (typeof key === "string") {
+            return { [key]: localStorageArea[key] };
+          }
+          return Object.assign({}, localStorageArea);
+        },
+        async set(items) {
+          Object.assign(localStorageArea, items);
+        },
+      },
+      sync: {
+        get: async () => ({}),
+      },
+      onChanged: {
+        addListener() {},
+      },
+    },
+    runtime: {
+      sendMessage() {},
+      onMessage: {
+        addListener() {},
+      },
+    },
+  };
+
+  window.eval(scriptSource);
+
+  const editor = window.document.getElementById("editor");
+  placeCaretAtEnd(window, editor);
+
+  await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/juris",
+    "<strong>What is Lorem Ipsum?</strong>",
+    "What is Lorem Ipsum?"
+  );
+
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  const probe = localStorageArea.minutario_last_word_probe;
+  assert.ok(Array.isArray(probe.trail));
+
+  const insertEntry = probe.trail.find((entry) => entry.phase === "word-edit-command-insert-result");
+  assert.ok(insertEntry);
+  assert.equal(insertEntry.details.handled, true);
+  assert.equal(insertEntry.details.rootContainsExpected, false);
+  assert.doesNotMatch(insertEntry.details.rootText, /\/juris/);
+});
+
+test("persists Word edit command result after residual shortcut cleanup", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/juris</div></body></html>',
+    {
+      runScripts: "outside-only",
+      pretendToBeVisual: true,
+      url: "about:blank",
+      referrer: "https://wordeditorframe.aspx/?WOPIsrc=test",
+    }
+  );
+  const { window } = dom;
+  const localStorageArea = {};
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+
+    setData(type, value) {
+      this.data[type] = value;
+    }
+
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+  window.ClipboardItem = FakeClipboardItem;
+  window.document.execCommand = (command, showUI, value) => {
+    if (command !== "insertText") {
+      return false;
+    }
+
+    // Simulate a real execCommand that replaces the selected text.
+    // Uses deleteContents + insertNode so Range references stay valid
+    // and pass the post-condition check in insertHtmlWithEditingCommand.
+    const sel = window.getSelection();
+    if (sel.rangeCount > 0) {
+      const r = sel.getRangeAt(0);
+      r.deleteContents();
+      r.insertNode(window.document.createTextNode(value || ""));
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    return true;
+  };
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      write: async () => {},
+    },
+  });
+
+  window.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (typeof key === "string") {
+            return { [key]: localStorageArea[key] };
+          }
+          return Object.assign({}, localStorageArea);
+        },
+        async set(items) {
+          Object.assign(localStorageArea, items);
+        },
+      },
+      sync: {
+        get: async () => ({}),
+      },
+      onChanged: {
+        addListener() {},
+      },
+    },
+    runtime: {
+      sendMessage() {},
+      onMessage: {
+        addListener() {},
+      },
+    },
+  };
+
+  window.eval(scriptSource);
+
+  const editor = window.document.getElementById("editor");
+  placeCaretAtEnd(window, editor);
+
+  await window.MacroBlazeContent.expandTemplateAtSelectionRich(
+    window.document,
+    "/juris",
+    "<strong>este é um exemplo de minuta</strong>",
+    "este é um exemplo de minuta"
+  );
+
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  const probe = localStorageArea.minutario_last_word_probe;
+  const insertEntry = probe.trail.find((entry) => entry.phase === "word-edit-command-insert-result");
+  assert.ok(insertEntry);
+  assert.equal(insertEntry.details.handled, true);
+  // With a real execCommand that replaces the selected text, there is no
+  // residual shortcut left before cleanup.
+  assert.equal(insertEntry.details.rootContainsExpectedBeforeCleanup, false);
+  assert.doesNotMatch(insertEntry.details.rootTextBeforeCleanup, /\/juris/);
+  assert.equal(insertEntry.details.rootContainsExpected, false);
+  assert.doesNotMatch(insertEntry.details.rootText, /\/juris/);
 });
 
 test("persists Word keydown diagnostics before template expansion is attempted", async () => {

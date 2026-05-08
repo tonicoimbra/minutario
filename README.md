@@ -20,8 +20,8 @@ Funciona em qualquer site: Word Online, Google Docs, e-mails, formulários, etc.
 - **Editor rich-text** (Quill.js) para criar modelos com formatação
 - **Organização por pastas**
 - **Importação/Exportação CSV** — carregue ou baixe todos os templates em massa
-- **Backup Google Drive** — sincronize seus templates com o Google Drive
 - **Sincronização Supabase** — sincronização em tempo real na nuvem com merge inteligente
+- **Consulta rápida em janela própria** — busque, visualize e copie minutas com formatação rica
 - **Busca rápida** por nome ou atalho
 
 ---
@@ -33,7 +33,7 @@ Funciona em qualquer site: Word Online, Google Docs, e-mails, formulários, etc.
 3. Clique em **Carregar sem compactação**
 4. Selecione a pasta deste projeto
 
-A extensão aparecerá na barra de ferramentas. Clique no ícone para abrir o popup, e depois em **Dashboard** para gerenciar seus templates.
+A extensão aparecerá na barra de ferramentas. Clique no ícone para abrir o popup, e depois em **Consulta Rápida** ou **Abrir Dashboard** conforme o fluxo desejado.
 
 ---
 
@@ -56,6 +56,17 @@ Em qualquer campo de texto, textarea ou editor contenteditable:
 1. Digite `/` seguido do atalho (ex: `/contrato`)
 2. Pressione **Espaço**
 3. O texto será substituído pelo conteúdo do template
+
+### Consulta rápida
+
+1. Clique no ícone da extensão
+2. Clique em **Consulta Rápida**
+3. Pesquise por nome, atalho ou `/comando`
+4. Confira o preview do conteúdo
+5. Clique em **📋 Copiar** ou pressione **Enter**
+6. Volte ao aplicativo original e cole com `Ctrl+V`
+
+**Atalho da extensão:** `Ctrl+Shift+K` (`Command+Shift+K` no macOS) com o Chrome em foco abre a janela de consulta rápida.
 
 ---
 
@@ -89,41 +100,6 @@ name,shortcut,folder,content
 
 1. No Dashboard, clique em **💾 Exportar CSV**
 2. O arquivo `minutario-templates.csv` será baixado automaticamente
-
----
-
-## Google Drive Sync
-
-### O que faz
-
-- **Backup Drive**: salva todos os templates em um arquivo JSON no seu Google Drive
-- **Restaurar Drive**: substitui os templates locais pelo backup do Drive
-
-### Configuração (obrigatória antes de usar)
-
-1. Acesse [Google Cloud Console](https://console.cloud.google.com/)
-2. Crie um novo projeto (ou use um existente)
-3. Vá em **APIs e Serviços → Credenciais → Criar credenciais → ID do cliente OAuth**
-4. Selecione **Aplicativo Chrome** como tipo
-5. Em **ID do aplicativo**, insira o ID da sua extensão Chrome (você pode encontrá-lo em `chrome://extensions` após carregar a extensão)
-6. Copie o **ID do cliente** (Client ID)
-7. No arquivo `manifest.json`, substitua o placeholder:
-   ```json
-   "oauth2": {
-     "client_id": "SEU_CLIENT_ID.apps.googleusercontent.com",
-     "scopes": [
-       "https://www.googleapis.com/auth/drive.file"
-     ]
-   }
-   ```
-8. Recarregue a extensão em `chrome://extensions`
-
-### Usar
-
-1. No Dashboard, clique em **☁️ Backup Drive** para salvar
-2. Clique em **📥 Restaurar Drive** para recuperar
-
-**Nota:** A primeira vez que usar, o Chrome pedirá permissão para acessar o Google Drive.
 
 ---
 
@@ -200,11 +176,11 @@ Roda todos os testes automatizados via `node:test` + jsdom.
 | `background.js` | Service worker — roteador de mensagens |
 | `content.js` | Script injetado em todas as páginas — listener de teclas e expansão |
 | `popup/` | Popup da barra de ferramentas |
+| `quick-access/` | Janela rápida — busca, preview e cópia de minutas |
 | `dashboard/` | Dashboard completo — CRUD de templates, pastas, importação e sync |
 | `dashboard/sync/csv.js` | Parser e importador de CSV |
-| `dashboard/sync/drive.js` | Integração com Google Drive (OAuth2) |
 | `dashboard/sync/supabase.js` | Integração com Supabase (auth + sync) |
-| `dashboard/sync/index.js` | Facade que orquestra os backends de sync |
+| `dashboard/sync/index.js` | Facade de sincronização local/Supabase |
 | `lib/` | Bibliotecas bundladas (Quill, PapaParse, Supabase) — funcionam offline |
 
 ---
@@ -216,7 +192,6 @@ Roda todos os testes automatizados via `node:test` + jsdom.
 - Quill.js (editor rich-text)
 - PapaParse (parser CSV)
 - Supabase JS Client (sync em nuvem)
-- Google Identity API (OAuth2 para Drive)
 - jsdom + node:test (testes)
 
 ---
