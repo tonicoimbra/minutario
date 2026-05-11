@@ -12,7 +12,7 @@
   var WORD_SELECTION_SYNC_DELAY_MS = 60;
   var wordProbeTrail = [];
   var lastDeleteInfo = null;
-  var TEXT_EXPANDER_LOG_PREFIX = "[TextExpander]";
+  var TEXT_EXPANDER_LOG_PREFIX = "[TextExpander-Firefox]";
   var wordOnlineCommandOverlay = null;
 
   function debugLog(message, details) {
@@ -323,14 +323,14 @@
 
     try {
       if (
-        chrome &&
-        chrome.storage &&
-        chrome.storage.local &&
-        typeof chrome.storage.local.set === "function"
+        typeof browser !== "undefined" &&
+        browser.storage &&
+        browser.storage.local &&
+        typeof browser.storage.local.set === "function"
       ) {
         var storagePayload = {};
         storagePayload[WORD_PROBE_STORAGE_KEY] = probe;
-        chrome.storage.local.set(storagePayload);
+        browser.storage.local.set(storagePayload);
       }
     } catch (storageError) {
       // Ignore probe persistence errors.
@@ -363,14 +363,14 @@
 
     try {
       if (
-        chrome &&
-        chrome.storage &&
-        chrome.storage.local &&
-        typeof chrome.storage.local.set === "function"
+        typeof browser !== "undefined" &&
+        browser.storage &&
+        browser.storage.local &&
+        typeof browser.storage.local.set === "function"
       ) {
         var storagePayload = {};
         storagePayload[WORD_PROBE_STORAGE_KEY] = probe;
-        chrome.storage.local.set(storagePayload);
+        browser.storage.local.set(storagePayload);
       }
     } catch (storageError) {
       // Ignore probe persistence errors.
@@ -413,7 +413,7 @@
 
   async function loadSettings() {
     try {
-      var result = await chrome.storage.sync.get("settings");
+      var result = await browser.storage.sync.get("settings");
       applySettings(result && result.settings);
     } catch (error) {
       console.error("Minutário failed to load settings:", error);
@@ -469,9 +469,9 @@
 
   async function loadTemplates() {
     try {
-      if (chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
+      if (browser.runtime && typeof browser.runtime.sendMessage === "function") {
         try {
-          var response = await chrome.runtime.sendMessage({
+          var response = await browser.runtime.sendMessage({
             type: "GET_TEMPLATES",
             payload: {},
           });
@@ -506,10 +506,10 @@
       }
 
       if (!loadedFromDB) {
-        // Fallback: chrome.storage.sync
-        var result = await chrome.storage.sync.get(null);
+        // Fallback: browser.storage.sync
+        var result = await browser.storage.sync.get(null);
         templateCache = buildTemplateCache(result);
-        debugLog("Templates carregados via chrome.storage.sync.", {
+        debugLog("Templates carregados via browser.storage.sync.", {
           count: Object.keys(templateCache).length,
         });
       }
@@ -1687,16 +1687,16 @@
 
   async function sendExtensionMessage(message) {
     if (
-      typeof chrome === "undefined" ||
-      !chrome ||
-      !chrome.runtime ||
-      typeof chrome.runtime.sendMessage !== "function"
+      typeof browser === "undefined" ||
+      !browser ||
+      !browser.runtime ||
+      typeof browser.runtime.sendMessage !== "function"
     ) {
       return null;
     }
 
     try {
-      return await chrome.runtime.sendMessage(message);
+      return await browser.runtime.sendMessage(message);
     } catch (error) {
       if (!isBenignExtensionContextError(error)) {
         textExpanderWarn("Runtime message failed.", {
@@ -1708,39 +1708,102 @@
     }
   }
 
-  function isPositiveDebuggerResponse(response, dataKey) {
-    return !!(
-      response &&
-      response.ok === true &&
-      response.data &&
-      response.data[dataKey] === true
-    );
+  function requestWordOnlineFirefoxNativeInsert(doc, html, plainText) {
+    if (!doc || (!html && !plainText)) {
+      return false;
+    }
+
+    // Firefox não oferece o Chrome DevTools Protocol para extensões comuns.
+    // A adaptação preserva o buffer pré-commit: o gatilho não entra no modelo
+    // do Word. A inserção é feita pelo comando de edição nativo do documento.
+    focusEditingSurface(doc, {
+      root: findEditableRoot(doc.activeElement),
+      scope: doc.body || doc.documentElement,
+    });
+
+    if (typeof doc.execCommand === "function") {
+      try {
+        if (html && doc.execCommand("insertHTML", false, html) === true) {
+          logWordDecision(doc, "word-firefox-insert-html-result", {
+            inserted: true,
+            htmlLength: html.length,
+          });
+          return true;
+        }
+      } catch (htmlError) {
+        logWordDecision(doc, "word-firefox-insert-html-result", {
+          inserted: false,
+          error: getErrorMessage(htmlError),
+        });
+      }
+
+      try {
+        if (plainText && doc.execCommand("insertText", false, plainText) === true) {
+          logWordDecision(doc, "word-firefox-insert-text-result", {
+            inserted: true,
+            textLength: plainText.length,
+          });
+          return true;
+        }
+      } catch (textError) {
+        logWordDecision(doc, "word-firefox-insert-text-result", {
+          inserted: false,
+          error: getErrorMessage(textError),
+        });
+      }
+    }
+
+    try {
+      if (insertWordOnlineHtmlAtCaret(doc, html, plainText)) {
+        logWordDecision(doc, "word-firefox-dom-insert-result", {
+          inserted: true,
+          textLength: plainText ? plainText.length : 0,
+        });
+        return true;
+      }
+    } catch (domError) {
+      logWordDecision(doc, "word-firefox-dom-insert-result", {
+        inserted: false,
+        error: getErrorMessage(domError),
+      });
+    }
+
+    return false;
   }
 
-  async function requestWordOnlineDebuggerPaste(doc, html, plainText) {
+  async function requestWordOnlineFirefoxClipboardPaste(doc, html, plainText) {
     var previousClipboardText = await readClipboardTextSafely(doc);
     var clipboardReady = await writeRichClipboard(doc, html, plainText);
 
     if (!clipboardReady) {
-      logWordDecision(doc, "word-cdp-paste-clipboard-unavailable", {
+      logWordDecision(doc, "word-firefox-clipboard-unavailable", {
         plainTextLength: plainText ? plainText.length : 0,
       });
       return false;
     }
 
-    var response = await sendExtensionMessage({
-      type: "WORD_ONLINE_CDP_PASTE",
-      payload: {
-        plainTextLength: plainText ? plainText.length : 0,
-        htmlLength: html ? html.length : 0,
-      },
-    });
-    var pasted = isPositiveDebuggerResponse(response, "pasted");
+    var pasted = false;
 
-    logWordDecision(doc, "word-cdp-paste-result", {
+    try {
+      if (typeof doc.execCommand === "function") {
+        pasted = doc.execCommand("paste", false, null) === true;
+      }
+    } catch (pasteError) {
+      pasted = false;
+    }
+
+    if (!pasted) {
+      try {
+        var range = getSelectedRange(doc);
+        pasted = dispatchRichPaste(doc, range, html, plainText);
+      } catch (syntheticPasteError) {
+        pasted = false;
+      }
+    }
+
+    logWordDecision(doc, "word-firefox-clipboard-paste-result", {
       pasted: pasted,
-      responseOk: !!(response && response.ok),
-      error: response && response.error ? response.error : "",
+      plainTextLength: plainText ? plainText.length : 0,
     });
 
     if (pasted) {
@@ -1750,44 +1813,19 @@
     return pasted;
   }
 
-  async function requestWordOnlineDebuggerText(doc, text) {
-    if (!text) {
-      return false;
-    }
-
-    var response = await sendExtensionMessage({
-      type: "WORD_ONLINE_CDP_INSERT_TEXT",
-      payload: {
-        text: text,
-      },
-    });
-    var inserted = isPositiveDebuggerResponse(response, "inserted");
-
-    logWordDecision(doc, "word-cdp-insert-text-result", {
-      inserted: inserted,
-      textLength: text.length,
-      responseOk: !!(response && response.ok),
-      error: response && response.error ? response.error : "",
-    });
-
-    return inserted;
-  }
-
   function insertWordOnlineBufferedText(doc, text) {
     if (!doc || !text) {
       return false;
     }
 
-    requestWordOnlineDebuggerText(doc, text).then(function(inserted) {
-      if (!inserted) {
-        insertWordOnlineTextAtCaret(doc, text);
-      }
-    }).catch(function(error) {
+    try {
+      requestWordOnlineFirefoxNativeInsert(doc, "", text);
+    } catch (error) {
       textExpanderWarn("Word Online buffered text insertion failed.", {
         error: getErrorMessage(error),
       });
       insertWordOnlineTextAtCaret(doc, text);
-    });
+    }
 
     return true;
   }
@@ -1914,15 +1952,15 @@
       shortcut: expectedText,
     });
 
-    // Word Online owns a private document model. The reliable path is to avoid
-    // committing the shortcut to that model at all, then send the expansion as
-    // browser-level text through Chrome DevTools Protocol. Input.insertText does
-    // not depend on the system clipboard, so it avoids Word reading stale
-    // clipboard contents while the browser is still settling a rich write.
-    var inserted = await requestWordOnlineDebuggerText(doc, plainText);
+    // O Word Online mantém um modelo interno próprio. No Firefox, mantemos o
+    // gatilho fora desse modelo e inserimos a expansão com comandos de edição
+    // suportados pelo Gecko, pois o caminho CDP do Chromium não existe aqui.
+    sendExtensionMessage({ type: "WORD_ONLINE_FIREFOX_STATUS" });
+
+    var inserted = requestWordOnlineFirefoxNativeInsert(doc, html, plainText);
 
     if (!inserted) {
-      inserted = await requestWordOnlineDebuggerPaste(doc, html, plainText);
+      inserted = await requestWordOnlineFirefoxClipboardPaste(doc, html, plainText);
     }
 
     if (!inserted) {
@@ -1932,7 +1970,7 @@
     if (inserted) {
       logWordDecision(doc, "word-shadow-expansion-success", {
         expectedText: expectedText,
-        strategy: "precommit-cdp",
+        strategy: "precommit-firefox-native",
       });
       scheduleWordProbeSnapshots(doc, expectedText, plainText);
       return true;
@@ -2948,8 +2986,8 @@
   }
 
   function notifyTemplateUsed(template) {
-    if (chrome.runtime && typeof chrome.runtime.sendMessage === "function") {
-      var result = chrome.runtime.sendMessage({
+    if (browser.runtime && typeof browser.runtime.sendMessage === "function") {
+      var result = browser.runtime.sendMessage({
         type: "UPDATE_RECENT",
         payload: { templateId: template.id },
       });
@@ -3355,7 +3393,7 @@
     return;
   }
 
-  chrome.storage.onChanged.addListener(function (changes, areaName) {
+  browser.storage.onChanged.addListener(function (changes, areaName) {
     if (areaName !== "sync") {
       return;
     }
@@ -3373,7 +3411,7 @@
     }
   });
 
-  chrome.runtime.onMessage.addListener(function (message) {
+  browser.runtime.onMessage.addListener(function (message) {
     if (message && message.type === "TEMPLATES_UPDATED") {
       scheduleTemplateReload("runtime-message");
     }

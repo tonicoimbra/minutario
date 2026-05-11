@@ -1,11 +1,3 @@
-importScripts(
-  "lib/supabase.min.js",
-  "shared/config.js",
-  "shared/db.js",
-  "shared/api.js",
-  "shared/sync.js"
-);
-
 const STORAGE_VERSION_KEY = "storageVersion";
 const CURRENT_STORAGE_VERSION = 1;
 const RECENT_KEY = "recent";
@@ -14,8 +6,7 @@ const SYNC_ALARM_NAME = "minutario-sync";
 const SYNC_INTERVAL_MINUTES = 5;
 const QUICK_ACCESS_WINDOW_WIDTH = 1120;
 const QUICK_ACCESS_WINDOW_HEIGHT = 760;
-const DEBUGGER_PROTOCOL_VERSION = "1.3";
-const TEXT_EXPANDER_LOG_PREFIX = "[TextExpander]";
+const TEXT_EXPANDER_LOG_PREFIX = "[TextExpander-Firefox]";
 
 const migrationState = {
   failed: false,
@@ -94,115 +85,6 @@ function textExpanderWarn(message, details) {
   console.warn(TEXT_EXPANDER_LOG_PREFIX + " " + message, details);
 }
 
-function getSenderTabId(sender) {
-  if (sender && sender.tab && typeof sender.tab.id === "number") {
-    return sender.tab.id;
-  }
-
-  return null;
-}
-
-async function withDebuggerSession(tabId, callback) {
-  if (
-    typeof tabId !== "number" ||
-    !chrome.debugger ||
-    typeof chrome.debugger.attach !== "function" ||
-    typeof chrome.debugger.sendCommand !== "function" ||
-    typeof chrome.debugger.detach !== "function"
-  ) {
-    return { ok: false, error: "Chrome debugger API unavailable" };
-  }
-
-  const target = { tabId };
-  let attached = false;
-
-  try {
-    await chrome.debugger.attach(target, DEBUGGER_PROTOCOL_VERSION);
-    attached = true;
-    const data = await callback(target);
-    return { ok: true, data: data || {} };
-  } catch (error) {
-    const message = getErrorMessage(error) || "Debugger command failed";
-    textExpanderWarn("Word Online CDP operation failed.", {
-      tabId,
-      error: message,
-    });
-    return { ok: false, error: message };
-  } finally {
-    if (attached) {
-      try {
-        await chrome.debugger.detach(target);
-      } catch (detachError) {
-        textExpanderWarn("Word Online CDP detach failed.", {
-          tabId,
-          error: getErrorMessage(detachError),
-        });
-      }
-    }
-  }
-}
-
-async function dispatchDebuggerKey(target, payload) {
-  await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", payload);
-}
-
-function buildKeyEvent(type, key, code, windowsVirtualKeyCode, modifiers) {
-  return {
-    type,
-    key,
-    code,
-    windowsVirtualKeyCode,
-    nativeVirtualKeyCode: windowsVirtualKeyCode,
-    modifiers: modifiers || 0,
-  };
-}
-
-async function pasteWithDebugger(sender) {
-  const tabId = getSenderTabId(sender);
-
-  return withDebuggerSession(tabId, async function(target) {
-    // This sends a browser-level Ctrl+V into the currently focused Word frame.
-    // Word Online accepts it as a first-party edit and updates its own model.
-    await dispatchDebuggerKey(
-      target,
-      buildKeyEvent("rawKeyDown", "Control", "ControlLeft", 17, 2)
-    );
-    await dispatchDebuggerKey(
-      target,
-      buildKeyEvent("rawKeyDown", "v", "KeyV", 86, 2)
-    );
-    await dispatchDebuggerKey(
-      target,
-      buildKeyEvent("keyUp", "v", "KeyV", 86, 2)
-    );
-    await dispatchDebuggerKey(
-      target,
-      buildKeyEvent("keyUp", "Control", "ControlLeft", 17, 0)
-    );
-
-    textExpanderLog("Word Online CDP paste dispatched.", { tabId });
-    return { pasted: true };
-  });
-}
-
-async function insertTextWithDebugger(sender, payload) {
-  const tabId = getSenderTabId(sender);
-  const text = payload && typeof payload.text === "string" ? payload.text : "";
-
-  if (!text) {
-    return { ok: false, error: "Missing text" };
-  }
-
-  return withDebuggerSession(tabId, async function(target) {
-    await chrome.debugger.sendCommand(target, "Input.insertText", { text });
-    textExpanderLog("Word Online CDP text inserted.", {
-      tabId,
-      length: text.length,
-    });
-    return { inserted: true };
-  });
-}
-
 function isBenignStorageMigrationError(exception) {
   var message = getErrorMessage(exception).toLowerCase();
   return message.indexOf("context invalidated") !== -1;
@@ -243,7 +125,7 @@ async function runStartupMigration() {
   let storedVersion = 0;
 
   try {
-    const stored = await chrome.storage.local.get(STORAGE_VERSION_KEY);
+    const stored = await browser.storage.local.get(STORAGE_VERSION_KEY);
     const rawVersion = stored[STORAGE_VERSION_KEY];
     storedVersion = Number.isInteger(rawVersion) ? rawVersion : 0;
   } catch (error) {
@@ -265,7 +147,7 @@ async function runStartupMigration() {
   }
 
   try {
-    await chrome.storage.local.set({ [STORAGE_VERSION_KEY]: CURRENT_STORAGE_VERSION });
+    await browser.storage.local.set({ [STORAGE_VERSION_KEY]: CURRENT_STORAGE_VERSION });
   } catch (error) {
     handleMigrationError("write", STORAGE_VERSION_KEY, error);
   }
@@ -274,43 +156,43 @@ async function runStartupMigration() {
 const migrationPromise = runStartupMigration();
 
 async function openDashboard(payload) {
-  const dashboardUrl = chrome.runtime.getURL("dashboard/dashboard.html");
-  const tabs = await chrome.tabs.query({ url: dashboardUrl });
+  const dashboardUrl = browser.runtime.getURL("dashboard/dashboard.html");
+  const tabs = await browser.tabs.query({ url: dashboardUrl });
   const existingTab = tabs[0];
 
   if (existingTab && payload?.focusExisting !== false) {
     if (typeof existingTab.id === "number") {
-      await chrome.tabs.update(existingTab.id, { active: true });
+      await browser.tabs.update(existingTab.id, { active: true });
     }
 
     if (typeof existingTab.windowId === "number") {
-      await chrome.windows.update(existingTab.windowId, { focused: true });
+      await browser.windows.update(existingTab.windowId, { focused: true });
     }
   } else {
-    await chrome.tabs.create({ url: dashboardUrl });
+    await browser.tabs.create({ url: dashboardUrl });
   }
 
   return { ok: true, data: null };
 }
 
 async function openQuickAccess(payload) {
-  const quickAccessUrl = chrome.runtime.getURL("quick-access/quick-access.html");
-  const existingTabs = await chrome.tabs.query({ url: quickAccessUrl });
+  const quickAccessUrl = browser.runtime.getURL("quick-access/quick-access.html");
+  const existingTabs = await browser.tabs.query({ url: quickAccessUrl });
   const existingTab = existingTabs[0];
 
   if (existingTab && payload?.focusExisting !== false) {
     if (typeof existingTab.id === "number") {
-      await chrome.tabs.update(existingTab.id, { active: true });
+      await browser.tabs.update(existingTab.id, { active: true });
     }
 
     if (typeof existingTab.windowId === "number") {
-      await chrome.windows.update(existingTab.windowId, { focused: true });
+      await browser.windows.update(existingTab.windowId, { focused: true });
     }
 
     return { ok: true, data: { reused: true } };
   }
 
-  await chrome.windows.create({
+  await browser.windows.create({
     url: quickAccessUrl,
     type: "popup",
     width: QUICK_ACCESS_WINDOW_WIDTH,
@@ -328,7 +210,7 @@ async function getTemplates(payload) {
     if (typeof MinutarioDB !== "undefined" && MinutarioDB.getAllTemplates) {
       templates = await MinutarioDB.getAllTemplates();
     } else {
-      const allItems = await chrome.storage.sync.get(null);
+      const allItems = await browser.storage.sync.get(null);
       templates = Object.entries(allItems)
         .filter(([key]) => key.startsWith("tpl_"))
         .map(([, value]) => value)
@@ -384,7 +266,7 @@ async function getFolders() {
 
 async function getRecent() {
   try {
-    const stored = await chrome.storage.local.get(RECENT_KEY);
+    const stored = await browser.storage.local.get(RECENT_KEY);
     const recent = Array.isArray(stored[RECENT_KEY]) ? stored[RECENT_KEY] : [];
     return { ok: true, data: recent.slice(0, MAX_RECENT) };
   } catch (error) {
@@ -399,19 +281,19 @@ async function updateRecent(payload) {
     return { ok: false, error: "Invalid templateId" };
   }
 
-  const stored = await chrome.storage.local.get(RECENT_KEY);
+  const stored = await browser.storage.local.get(RECENT_KEY);
   const current = Array.isArray(stored[RECENT_KEY]) ? stored[RECENT_KEY] : [];
 
   const deduped = [templateId, ...current.filter((id) => id !== templateId)];
   const recent = deduped.slice(0, MAX_RECENT);
 
-  await chrome.storage.local.set({ [RECENT_KEY]: recent });
+  await browser.storage.local.set({ [RECENT_KEY]: recent });
   return { ok: true };
 }
 
 async function performSync() {
   try {
-    const stored = await chrome.storage.local.get("minutario_user_id");
+    const stored = await browser.storage.local.get("minutario_user_id");
     const userId = stored.minutario_user_id;
 
     if (!userId) {
@@ -425,11 +307,11 @@ async function performSync() {
     const result = await MinutarioSync.syncTemplates(userId);
 
     if (result.success) {
-      const tabs = await chrome.tabs.query({});
+      const tabs = await browser.tabs.query({});
       for (const tab of tabs) {
         if (typeof tab.id === "number") {
           try {
-            await chrome.tabs.sendMessage(tab.id, { type: "TEMPLATES_UPDATED" });
+            await browser.tabs.sendMessage(tab.id, { type: "TEMPLATES_UPDATED" });
           } catch (e) {
             // Tab may not have content script loaded
           }
@@ -446,32 +328,32 @@ async function performSync() {
 }
 
 // Alarms
-chrome.alarms.onAlarm.addListener((alarm) => {
+browser.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM_NAME) {
     void performSync();
   }
 });
 
-chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create(SYNC_ALARM_NAME, {
+browser.runtime.onStartup.addListener(() => {
+  browser.alarms.create(SYNC_ALARM_NAME, {
     periodInMinutes: SYNC_INTERVAL_MINUTES,
   });
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create(SYNC_ALARM_NAME, {
+browser.runtime.onInstalled.addListener(() => {
+  browser.alarms.create(SYNC_ALARM_NAME, {
     periodInMinutes: SYNC_INTERVAL_MINUTES,
   });
 });
 
-chrome.commands.onCommand.addListener((command) => {
+browser.commands.onCommand.addListener((command) => {
   if (command === "open-quick-access") {
     void openQuickAccess({ focusExisting: true });
   }
 });
 
 // Message handling
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void (async () => {
     await migrationPromise;
 
@@ -511,12 +393,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: true, data: result });
           return;
         }
-        case "WORD_ONLINE_CDP_PASTE": {
-          sendResponse(await pasteWithDebugger(sender));
-          return;
-        }
-        case "WORD_ONLINE_CDP_INSERT_TEXT": {
-          sendResponse(await insertTextWithDebugger(sender, message.payload));
+        case "WORD_ONLINE_FIREFOX_STATUS": {
+          textExpanderLog("Word Online Firefox compatibility path active.", {
+            tabId: sender && sender.tab && sender.tab.id,
+          });
+          sendResponse({ ok: true, data: { firefoxWordPath: true } });
           return;
         }
         case "GET_SYNC_STATE": {

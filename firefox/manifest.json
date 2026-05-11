@@ -1,18 +1,30 @@
 {
-  "manifest_version": 3,
-  "name": "Minutário",
+  "manifest_version": 2,
+  "name": "Minutário para Firefox",
   "version": "1.1.0",
   "description": "Expanda atalhos de texto em modelos HTML ricos em qualquer página do navegador.",
   "author": "Elvertoni Coimbra",
-  "permissions": ["storage", "clipboardWrite", "clipboardRead", "alarms", "tabs", "debugger"],
-  "host_permissions": [
+  "permissions": [
+    "storage",
+    "clipboardWrite",
+    "clipboardRead",
+    "alarms",
+    "tabs",
     "<all_urls>",
     "https://*.supabase.co/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": [
+      "lib/supabase.min.js",
+      "shared/config.js",
+      "shared/db.js",
+      "shared/api.js",
+      "shared/sync.js",
+      "background.js"
+    ],
+    "persistent": false
   },
-  "action": {
+  "browser_action": {
     "default_popup": "popup/popup.html",
     "default_title": "Minutário"
   },
@@ -27,9 +39,7 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
+      "matches": ["<all_urls>"],
       "js": [
         "shared/config.js",
         "shared/db.js",
@@ -39,27 +49,27 @@
       ],
       "run_at": "document_idle",
       "all_frames": true,
-      "match_about_blank": true,
-      "match_origin_as_fallback": true
+      "match_about_blank": true
     }
   ],
   "web_accessible_resources": [
-    {
-      "resources": [
-        "dashboard/dashboard.html",
-        "dashboard/dashboard.js",
-        "dashboard/dashboard.css",
-        "dashboard/index.html",
-        "quick-access/*",
-        "shared/*",
-        "lib/*"
-      ],
-      "matches": ["<all_urls>"]
-    }
+    "dashboard/dashboard.html",
+    "dashboard/dashboard.js",
+    "dashboard/dashboard.css",
+    "dashboard/index.html",
+    "quick-access/*",
+    "shared/*",
+    "lib/*"
   ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "minutario-firefox@example.com",
+      "strict_min_version": "109.0"
+    }
   }
 }

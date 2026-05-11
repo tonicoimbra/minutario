@@ -29,16 +29,20 @@ function bootstrapDom() {
         var current = "";
         for (var i = 0; i < line.length; i++) {
           var ch = line.charAt(i);
-          if (ch === '"') {
+          var next = line.charAt(i + 1);
+          if (inQuotes && ch === '"' && next === '"') {
+            current += '"';
+            i += 1;
+          } else if (ch === '"') {
             inQuotes = !inQuotes;
           } else if (ch === delimiter && !inQuotes) {
-            values.push(current.trim().replace(/^"|"$/g, ""));
+            values.push(current.trim());
             current = "";
           } else {
             current += ch;
           }
         }
-        values.push(current.trim().replace(/^"|"$/g, ""));
+        values.push(current.trim());
         headers.forEach(function (h, i) {
           obj[h] = values[i] || "";
         });
@@ -64,6 +68,16 @@ test("parses simple CSV with 2 templates", () => {
   assert.equal(result.data[1].folder, "");
 });
 
+test("parses trigger and expansion aliases with accents and commas", () => {
+  const window = bootstrapDom();
+  const csv = '\uFEFFtrigger,expansion\n"multa","Texto com vírgula, acento e ""aspas"""';
+  const result = window.CsvSync.parseCsv(csv);
+  assert.equal(result.success, true);
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].shortcut, "multa");
+  assert.equal(result.data[0].content, 'Texto com vírgula, acento e "aspas"');
+});
+
 test("reports error for CSV missing required columns", () => {
   const window = bootstrapDom();
   const csv = 'nome,atalho\n"X","x"';
@@ -87,6 +101,8 @@ test("imports templates merging with existing and detects conflicts", () => {
   assert.equal(result.conflicts[0].shortcut, "ex");
   assert.equal(result.stats.total, 2);
   assert.equal(result.stats.conflicts, 1);
+  assert.equal(result.stats.created, 1);
+  assert.equal(result.stats.updated, 1);
 });
 
 test("maps folder names to existing folder IDs", () => {
@@ -97,4 +113,26 @@ test("maps folder names to existing folder IDs", () => {
   const folders = [{ id: "f-1", name: "Processos", order: 0 }];
   const result = window.CsvSync.importCsv(parsed, {}, folders);
   assert.equal(result.templates[0].folderId, "f-1");
+});
+
+test("exports RFC4180 CSV with BOM and escaped fields", () => {
+  const window = bootstrapDom();
+  const csv = window.CsvSync.exportCsv(
+    [
+      {
+        id: "tpl-1",
+        name: "Multa",
+        shortcut: "multa",
+        content: '<p>Texto, com "aspas"\ne quebra</p>',
+        plain_text: 'Texto, com "aspas"\ne quebra',
+        folder_id: "folder-1",
+      },
+    ],
+    [{ id: "folder-1", name: "Processos" }]
+  );
+
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  assert.match(csv, /^﻿trigger,expansion,name,folder,id,folder_id,plain_text,created_at,updated_at/);
+  assert.match(csv, /"Texto, com ""aspas""\ne quebra"/);
+  assert.match(csv, /Processos/);
 });

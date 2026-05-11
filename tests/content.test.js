@@ -776,7 +776,7 @@ test("Word expansion waits for host selection sync before plain text command", a
   await new Promise((resolve) => window.setTimeout(resolve, 20));
 
   assert.equal(expanded, true);
-  assert.equal(commands[0], "insertText");
+  assert.equal(commands[0], "insertHTML");
   assert.equal(editor.textContent, plainText);
   assert.doesNotMatch(editor.textContent, /\/multa/);
 });
@@ -817,7 +817,7 @@ test("Word expansion defers host edit command until after selection can settle",
   const expanded = await expansionPromise;
 
   assert.equal(expanded, true);
-  assert.deepEqual(commands, ["insertText"]);
+  assert.deepEqual(commands, ["insertHTML", "insertText"]);
   assert.equal(editor.textContent, "este é um exemplo de minuta");
 });
 
@@ -903,7 +903,7 @@ test("Word expansion falls back to rich paste when host edit command is unavaila
 
   assert.equal(expanded, true);
   assert.equal(pasteEventDispatched, true);
-  assert.equal(hostDeleteAttempted, false);
+  assert.equal(hostDeleteAttempted, true);
   assert.equal(editor.textContent, "este é um exemplo de minuta");
   assert.doesNotMatch(editor.textContent, /\/juris/);
 });
@@ -1846,6 +1846,117 @@ test("loads templates from the background message channel", async () => {
   assert.match(editor.innerHTML, /<strong>Contrato pronto<\/strong>/);
 });
 
+test("expands in the event target editor even when another contenteditable is active", async () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="title" contenteditable="true"></div><div id="body" contenteditable="true"></div></body></html>'
+  );
+  const { window } = dom;
+  const title = window.document.getElementById("title");
+  const body = window.document.getElementById("body");
+
+  window.MacroBlazeContent.setTemplateCache({
+    teste: {
+      id: "tpl-keep-body",
+      shortcut: "teste",
+      content: "<strong>Texto no corpo</strong>",
+    },
+  });
+
+  title.focus();
+
+  ["/", "t", "e", "s", "t", "e"].forEach((key) => {
+    const event = new window.KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+    });
+    body.dispatchEvent(event);
+    if (!event.defaultPrevented) {
+      body.textContent += key;
+      placeCaretAtEnd(window, body);
+    }
+  });
+
+  const completionEvent = new window.KeyboardEvent("keydown", {
+    key: " ",
+    code: "Space",
+    bubbles: true,
+    cancelable: true,
+  });
+  body.dispatchEvent(completionEvent);
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(title.textContent, "");
+  assert.equal(body.textContent, "Texto no corpo");
+  assert.doesNotMatch(body.textContent, /\/teste/);
+});
+
+test("Gmail and Keep avoid synthetic paste and insert at the shortcut range", () => {
+  const dom = bootstrapDom(
+    '<!doctype html><html><body><div id="editor" contenteditable="true">/teste</div></body></html>',
+    { url: "https://mail.google.com/mail/u/0/#inbox" }
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  let pasteDispatched = false;
+
+  class FakeDataTransfer {
+    constructor() {
+      this.data = {};
+    }
+    setData(type, value) {
+      this.data[type] = value;
+    }
+    getData(type) {
+      return this.data[type] || "";
+    }
+  }
+
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.clipboardData = init.clipboardData;
+    }
+  }
+
+  window.DataTransfer = FakeDataTransfer;
+  window.ClipboardEvent = FakeClipboardEvent;
+
+  editor.addEventListener("paste", () => {
+    pasteDispatched = true;
+  });
+
+  placeCaretAtEnd(window, editor);
+
+  window.MacroBlazeContent.setTemplateCache({
+    teste: {
+      id: "tpl-gmail",
+      shortcut: "teste",
+      content: "<strong>Texto no Gmail</strong>",
+    },
+  });
+
+  let prevented = false;
+  const handled = window.MacroBlazeContent.handleCompletionKey(
+    {
+      key: " ",
+      code: "Space",
+      preventDefault() {
+        prevented = true;
+      },
+    },
+    "/teste",
+    window.document
+  );
+
+  assert.equal(handled, true);
+  assert.equal(prevented, true);
+  assert.equal(pasteDispatched, false);
+  assert.equal(editor.textContent, "Texto no Gmail");
+  assert.match(editor.innerHTML, /<strong>Texto no Gmail<\/strong>/);
+});
+
 test("collects Word-style editor diagnostics from replaced editable roots", () => {
   const dom = bootstrapDom(
     '<!doctype html><html><body><div id="host"><div id="editor-a" contenteditable="true">texto antigo</div><div id="editor-b" contenteditable="true">/juris What is Lorem Ipsum?</div></div></body></html>'
@@ -2228,7 +2339,389 @@ test("persists Word keydown diagnostics before template expansion is attempted",
   await new Promise((resolve) => window.setTimeout(resolve, 10));
 
   assert.ok(localStorageArea.minutario_last_word_probe);
-  assert.equal(localStorageArea.minutario_last_word_probe.phase, "keydown-trigger-char");
+  assert.equal(localStorageArea.minutario_last_word_probe.phase, "word-shadow-trigger-char");
+});
+
+test("Word pre-commit buffer displays the typed shortcut without committing it", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="editor" contenteditable="true"></div></body></html>',
+    {
+      runScripts: "outside-only",
+      pretendToBeVisual: true,
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const localStorageArea = {};
+
+  window.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (typeof key === "string") {
+            return { [key]: localStorageArea[key] };
+          }
+          return Object.assign({}, localStorageArea);
+        },
+        async set(items) {
+          Object.assign(localStorageArea, items);
+        },
+      },
+      sync: {
+        get: async () => ({}),
+      },
+      onChanged: {
+        addListener() {},
+      },
+    },
+    runtime: {
+      async sendMessage(message) {
+        if (message && message.type === "GET_TEMPLATES") {
+          return { ok: true, data: [] };
+        }
+        return { ok: true };
+      },
+      onMessage: {
+        addListener() {},
+      },
+    },
+  };
+
+  window.eval(scriptSource);
+  await new Promise((resolve) => window.setTimeout(resolve, 80));
+
+  const editor = window.document.getElementById("editor");
+  editor.focus();
+  placeCaretAtEnd(window, editor);
+
+  ["/", "m", "u"].forEach((key) => {
+    const event = new window.KeyboardEvent("keydown", {
+      key,
+      code: key === "/" ? "Slash" : "Key" + key.toUpperCase(),
+      bubbles: true,
+      cancelable: true,
+    });
+    window.document.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  });
+
+  const overlay = window.document.querySelector('[data-minutario-word-command="true"]');
+  assert.ok(overlay);
+  assert.equal(overlay.textContent, "/mu");
+  assert.equal(editor.textContent, "");
+
+  const escapeEvent = new window.KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  window.document.dispatchEvent(escapeEvent);
+
+  assert.equal(window.document.querySelector('[data-minutario-word-command="true"]'), null);
+});
+
+test("Word completion key expands from shadow buffer without debugger messaging", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="editor" contenteditable="true"></div></body></html>',
+    {
+      runScripts: "outside-only",
+      pretendToBeVisual: true,
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const messages = [];
+  let consoleLogCount = 0;
+  const localStorageArea = {};
+
+  window.console.log = function () {
+    consoleLogCount += 1;
+  };
+
+  window.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (typeof key === "string") {
+            return { [key]: localStorageArea[key] };
+          }
+          return Object.assign({}, localStorageArea);
+        },
+        async set(items) {
+          Object.assign(localStorageArea, items);
+        },
+      },
+      sync: {
+        get: async () => ({}),
+      },
+      onChanged: {
+        addListener() {},
+      },
+    },
+    runtime: {
+      async sendMessage(message) {
+        messages.push(message);
+        if (message && message.type === "GET_TEMPLATES") {
+          return { ok: true, data: [] };
+        }
+        return { ok: true };
+      },
+      onMessage: {
+        addListener() {},
+      },
+    },
+  };
+
+  window.eval(scriptSource);
+  await new Promise((resolve) => window.setTimeout(resolve, 80));
+  messages.length = 0;
+
+  window.MacroBlazeContent.setTemplateCache({
+    teste: {
+      id: "tpl-word",
+      shortcut: "teste",
+      content: "<strong>Texto expandido</strong>",
+    },
+    testeplus: {
+      id: "tpl-word-longer",
+      shortcut: "testeplus",
+      content: "<strong>Texto maior</strong>",
+    },
+  });
+
+  const editor = window.document.getElementById("editor");
+  editor.focus();
+  placeCaretAtEnd(window, editor);
+
+  ["/", "t", "e", "s", "t", "e", " "].forEach((key) => {
+    const event = new window.KeyboardEvent("keydown", {
+      key,
+      code: key === " " ? "Space" : "",
+      bubbles: true,
+      cancelable: true,
+    });
+    window.document.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  });
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(editor.textContent, "Texto expandido");
+  assert.doesNotMatch(editor.textContent, /\/teste/);
+  assert.equal(
+    messages.some((message) => message.type === "WORD_ONLINE_CDP_EXPAND"),
+    false
+  );
+  assert.equal(consoleLogCount, 0);
+});
+
+test("Word completion key uses pre-commit CDP text insertion without committing the shortcut", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="editor" contenteditable="true"></div></body></html>',
+    {
+      runScripts: "outside-only",
+      pretendToBeVisual: true,
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const editor = window.document.getElementById("editor");
+  const localStorageArea = {};
+  const messages = [];
+  const clipboardWrites = [];
+
+  class FakeClipboardItem {
+    constructor(items) {
+      this.items = items;
+    }
+  }
+
+  window.ClipboardItem = FakeClipboardItem;
+  Object.defineProperty(window.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      readText: async () => "previous clipboard",
+      write: async (items) => {
+        clipboardWrites.push(items);
+      },
+      writeText: async () => {},
+    },
+  });
+
+  window.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (typeof key === "string") {
+            return { [key]: localStorageArea[key] };
+          }
+          return Object.assign({}, localStorageArea);
+        },
+        async set(items) {
+          Object.assign(localStorageArea, items);
+        },
+      },
+      sync: {
+        get: async () => ({}),
+      },
+      onChanged: {
+        addListener() {},
+      },
+    },
+    runtime: {
+      async sendMessage(message) {
+        messages.push(message);
+        if (message && message.type === "GET_TEMPLATES") {
+          return { ok: true, data: [] };
+        }
+        if (message && message.type === "WORD_ONLINE_CDP_INSERT_TEXT") {
+          editor.textContent = "Texto expandido";
+          placeCaretAtEnd(window, editor);
+          return { ok: true, data: { inserted: true } };
+        }
+        if (message && message.type === "WORD_ONLINE_CDP_PASTE") {
+          throw new Error("clipboard CDP fallback should not be used");
+        }
+        return { ok: true };
+      },
+      onMessage: {
+        addListener() {},
+      },
+    },
+  };
+
+  window.eval(scriptSource);
+  await new Promise((resolve) => window.setTimeout(resolve, 80));
+  messages.length = 0;
+
+  window.MacroBlazeContent.setTemplateCache({
+    teste: {
+      id: "tpl-word-cdp",
+      shortcut: "teste",
+      content: "<strong>Texto expandido</strong>",
+    },
+    testeplus: {
+      id: "tpl-word-cdp-longer",
+      shortcut: "testeplus",
+      content: "<strong>Texto maior</strong>",
+    },
+  });
+
+  editor.focus();
+  placeCaretAtEnd(window, editor);
+
+  ["/", "t", "e", "s", "t", "e"].forEach((key) => {
+    const event = new window.KeyboardEvent("keydown", {
+      key,
+      code: key === "/" ? "Slash" : "Key" + key.toUpperCase(),
+      bubbles: true,
+      cancelable: true,
+    });
+    window.document.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(editor.textContent, "");
+  });
+
+  const completionEvent = new window.KeyboardEvent("keydown", {
+    key: " ",
+    code: "Space",
+    bubbles: true,
+    cancelable: true,
+  });
+  window.document.dispatchEvent(completionEvent);
+  assert.equal(completionEvent.defaultPrevented, true);
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(editor.textContent, "Texto expandido");
+  assert.doesNotMatch(editor.textContent, /\/teste/);
+  assert.equal(clipboardWrites.length, 0);
+  assert.equal(
+    messages.some((message) => message.type === "WORD_ONLINE_CDP_INSERT_TEXT"),
+    true
+  );
+  assert.equal(
+    messages.some((message) => message.type === "WORD_ONLINE_CDP_PASTE"),
+    false
+  );
+});
+
+test("Word shadow buffer expands exact shortcuts without waiting for space", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="editor" contenteditable="true"></div></body></html>',
+    {
+      runScripts: "outside-only",
+      pretendToBeVisual: true,
+      url: "https://brc-word-edit.officeapps.live.com/we/wordeditorframe.aspx",
+      referrer: "https://tjpr-my.sharepoint.com/",
+    }
+  );
+  const { window } = dom;
+  const localStorageArea = {};
+
+  window.chrome = {
+    storage: {
+      local: {
+        async get(key) {
+          if (typeof key === "string") {
+            return { [key]: localStorageArea[key] };
+          }
+          return Object.assign({}, localStorageArea);
+        },
+        async set(items) {
+          Object.assign(localStorageArea, items);
+        },
+      },
+      sync: {
+        get: async () => ({}),
+      },
+      onChanged: {
+        addListener() {},
+      },
+    },
+    runtime: {
+      sendMessage() {
+        return { ok: true };
+      },
+      onMessage: {
+        addListener() {},
+      },
+    },
+  };
+
+  window.eval(scriptSource);
+  await new Promise((resolve) => window.setTimeout(resolve, 80));
+
+  window.MacroBlazeContent.setTemplateCache({
+    muta: {
+      id: "tpl-muta",
+      shortcut: "muta",
+      content: "<strong>Texto da multa</strong>",
+    },
+  });
+
+  const editor = window.document.getElementById("editor");
+  editor.focus();
+  placeCaretAtEnd(window, editor);
+
+  ["/", "m", "u", "t", "a"].forEach((key) => {
+    const event = new window.KeyboardEvent("keydown", {
+      key,
+      code: key === "/" ? "Slash" : "Key" + key.toUpperCase(),
+      bubbles: true,
+      cancelable: true,
+    });
+    window.document.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true);
+  });
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(editor.textContent, "Texto da multa");
+  assert.doesNotMatch(editor.textContent, /\/muta/);
 });
 
 test("ignores benign extension context invalidation when loading templates and falls back to IndexedDB", async () => {

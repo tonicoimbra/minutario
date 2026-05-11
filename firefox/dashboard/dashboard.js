@@ -146,16 +146,16 @@
   }
 
   function notifyTemplatesUpdated() {
-    if (!window.chrome || !chrome.tabs || !chrome.tabs.query || !chrome.tabs.sendMessage) {
+    if (!window.browser || !browser.tabs || !browser.tabs.query || !browser.tabs.sendMessage) {
       return Promise.resolve();
     }
 
-    return chrome.tabs.query({}).then(function(tabs) {
+    return browser.tabs.query({}).then(function(tabs) {
       return Promise.all((tabs || []).map(function(tab) {
         if (typeof tab.id !== "number") {
           return Promise.resolve();
         }
-        return chrome.tabs.sendMessage(tab.id, { type: "TEMPLATES_UPDATED" }).catch(function() {
+        return browser.tabs.sendMessage(tab.id, { type: "TEMPLATES_UPDATED" }).catch(function() {
           return undefined;
         });
       }));
@@ -193,8 +193,8 @@ function getUserIdFromUser(user) {
     var storedUserId = localStorage.getItem("minutario_user_id");
     if (storedUserId) return storedUserId;
 
-    if (window.chrome && chrome.storage && chrome.storage.local && chrome.storage.local.get) {
-      var result = await chrome.storage.local.get("minutario_user_id");
+    if (window.browser && browser.storage && browser.storage.local && browser.storage.local.get) {
+      var result = await browser.storage.local.get("minutario_user_id");
       return result && result.minutario_user_id ? result.minutario_user_id : null;
     }
 
@@ -206,8 +206,8 @@ function getUserIdFromUser(user) {
     userId = value;
     localStorage.setItem("minutario_user_id", value);
 
-    if (window.chrome && chrome.storage && chrome.storage.local && chrome.storage.local.set) {
-      await chrome.storage.local.set({ minutario_user_id: value });
+    if (window.browser && browser.storage && browser.storage.local && browser.storage.local.set) {
+      await browser.storage.local.set({ minutario_user_id: value });
     }
   }
 

@@ -20,6 +20,10 @@ const dashboardSource = fs.readFileSync(
   path.join(__dirname, "..", "dashboard", "dashboard.js"),
   "utf8"
 );
+const csvSource = fs.readFileSync(
+  path.join(__dirname, "..", "dashboard", "sync", "csv.js"),
+  "utf8"
+);
 
 function bootstrapDashboard(html, options) {
   options = options || {};
@@ -42,6 +46,8 @@ function bootstrapDashboard(html, options) {
   var remoteDeletedTemplateId = null;
   var syncUserId = null;
   var tabMessages = [];
+  var savedTemplates = [];
+  var downloadedFile = null;
   var apiUser = options.apiUser || {
     id: "user-1",
     email: "test@example.com",
@@ -94,6 +100,53 @@ function bootstrapDashboard(html, options) {
         tabMessages.push({ tabId, message });
       },
     },
+  };
+  window.Papa = {
+    parse(input, config) {
+      const rows = String(input || "").replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
+      const headers = rows[0].split(",").map((header) =>
+        config && typeof config.transformHeader === "function"
+          ? config.transformHeader(header)
+          : header
+      );
+      const data = rows.slice(1).map((line) => {
+        const values = [];
+        let current = "";
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i += 1) {
+          const ch = line.charAt(i);
+          const next = line.charAt(i + 1);
+          if (inQuotes && ch === '"' && next === '"') {
+            current += '"';
+            i += 1;
+          } else if (ch === '"') {
+            inQuotes = !inQuotes;
+          } else if (ch === "," && !inQuotes) {
+            values.push(current);
+            current = "";
+          } else {
+            current += ch;
+          }
+        }
+        values.push(current);
+        const row = {};
+        headers.forEach((header, index) => {
+          row[header] = values[index] || "";
+        });
+        return row;
+      });
+      return { data, errors: [], meta: { fields: headers } };
+    },
+  };
+  window.Blob = class TestBlob {
+    constructor(parts, options) {
+      this.parts = parts || [];
+      this.type = options && options.type ? options.type : "";
+    }
+
+    async text() {
+      return this.parts.map((part) => String(part)).join("");
+    }
   };
   window.MinutarioAPI = {
     getClient() {
@@ -154,6 +207,13 @@ function bootstrapDashboard(html, options) {
     },
     async putTemplate(template) {
       savedTemplate = template;
+      savedTemplates.push(template);
+      var idx = templates.findIndex((item) => item.id === template.id);
+      if (idx >= 0) {
+        templates[idx] = template;
+      } else {
+        templates.push(template);
+      }
     },
     async deleteTemplate(id) {
       deletedTemplateId = id;
@@ -169,6 +229,17 @@ function bootstrapDashboard(html, options) {
       deletedFolderId = id;
     },
     async deleteAllTemplates() {},
+  };
+  window.URL.createObjectURL = (blob) => {
+    downloadedFile = { blob, url: "blob:csv" };
+    return downloadedFile.url;
+  };
+  window.URL.revokeObjectURL = () => {};
+  window.HTMLAnchorElement.prototype.click = function () {
+    if (downloadedFile) {
+      downloadedFile.filename = this.download;
+      downloadedFile.href = this.href;
+    }
   };
   window.MinutarioSync = {
     onSyncStateChange() {},
@@ -192,6 +263,7 @@ function bootstrapDashboard(html, options) {
   window.confirm = () => true;
   window.prompt = () => "";
 
+  window.eval(csvSource);
   window.eval(dashboardSource);
   window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
 
@@ -201,6 +273,8 @@ function bootstrapDashboard(html, options) {
       storage,
       localStorageArea,
       getSavedTemplate: () => savedTemplate,
+      getSavedTemplates: () => savedTemplates.slice(),
+      getDownloadedFile: () => downloadedFile,
       getDeletedTemplateId: () => deletedTemplateId,
       getCreatedTemplate: () => createdTemplate,
       getUpdatedTemplate: () => updatedTemplate,
@@ -410,4 +484,101 @@ test("dashboard notifies open tabs after saving a template", async () => {
     { tabId: 101, message: { type: "TEMPLATES_UPDATED" } },
     { tabId: 202, message: { type: "TEMPLATES_UPDATED" } },
   ]);
+});
+
+test("dashboard exports templates as a dated UTF-8 CSV download", async () => {
+  const { window, getDownloadedFile } = await bootstrapDashboard(dashboardHtml, {
+    templates: [
+      {
+        id: "tpl-1",
+        name: "Multa",
+        shortcut: "multa",
+        content: '<p>Texto, com "aspas" e ç</p>',
+        plain_text: 'Texto, com "aspas" e ç',
+      },
+    ],
+  });
+
+  window.document.getElementById("export-csv").click();
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  const downloaded = getDownloadedFile();
+  assert.ok(downloaded);
+  assert.match(downloaded.filename, /^text-expander-backup-\d{4}-\d{2}-\d{2}\.csv$/);
+  const text = await downloaded.blob.text();
+  assert.equal(text.charCodeAt(0), 0xfeff);
+  assert.match(text, /trigger,expansion,name/);
+  assert.match(text, /"Texto, com ""aspas"" e ç"/);
+});
+
+test("dashboard imports CSV by adding new shortcuts and updating existing ones", async () => {
+  const { window, getSavedTemplates, getTabMessages } = await bootstrapDashboard(dashboardHtml, {
+    templates: [
+      {
+        id: "tpl-existing",
+        name: "Antigo",
+        shortcut: "multa",
+        content: "<p>Antigo</p>",
+        plain_text: "Antigo",
+      },
+    ],
+  });
+
+  const input = window.document.getElementById("import-csv");
+  const file = new window.File(
+    [
+      'trigger,expansion,name\n' +
+        '"multa","<p>Atualizado</p>","Multa atualizada"\n' +
+        '"novo","<p>Novo texto</p>","Novo"',
+    ],
+    "backup.csv",
+    { type: "text/csv" }
+  );
+
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [file],
+  });
+  input.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+  await new Promise((resolve) => window.setTimeout(resolve, 40));
+
+  const saved = getSavedTemplates();
+  assert.equal(saved.length, 2);
+  assert.equal(saved[0].id, "tpl-existing");
+  assert.equal(saved[0].content, "<p>Atualizado</p>");
+  assert.equal(saved[1].shortcut, "novo");
+  assert.match(window.document.getElementById("import-status").textContent, /1 gatilhos importados, 1 atualizados/);
+  assert.equal(getTabMessages().length, 2);
+});
+
+test("dashboard rejects invalid CSV without modifying templates", async () => {
+  const { window, getSavedTemplates } = await bootstrapDashboard(dashboardHtml, {
+    templates: [
+      {
+        id: "tpl-existing",
+        name: "Antigo",
+        shortcut: "multa",
+        content: "<p>Antigo</p>",
+      },
+    ],
+  });
+
+  const input = window.document.getElementById("import-csv");
+  const file = new window.File(['nome,atalho\n"X","x"'], "invalido.csv", {
+    type: "text/csv",
+  });
+
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [file],
+  });
+  input.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+  await new Promise((resolve) => window.setTimeout(resolve, 40));
+
+  assert.equal(getSavedTemplates().length, 0);
+  assert.match(window.document.getElementById("import-status").textContent, /Colunas obrigatórias ausentes/);
+  assert.equal(window.document.getElementById("import-status").classList.contains("error"), true);
 });

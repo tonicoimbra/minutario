@@ -49,6 +49,11 @@ function loadBackground(options) {
       commands: {
         onCommand: { addListener() {} },
       },
+      debugger: options.debugger || {
+        attach: async function () {},
+        sendCommand: async function () {},
+        detach: async function () {},
+      },
       tabs: {
         query: async function () { return []; },
         update: async function () {},
@@ -65,7 +70,7 @@ function loadBackground(options) {
 
   vm.runInNewContext(
     backgroundSource +
-      "\nmodule.exports = { runStartupMigration, migrationState, migrationPromise, isBenignStorageMigrationError, getErrorMessage };",
+      "\nmodule.exports = { runStartupMigration, migrationState, migrationPromise, isBenignStorageMigrationError, getErrorMessage, pasteWithDebugger, insertTextWithDebugger };",
     context,
     { filename: "background.js" }
   );
@@ -149,4 +154,62 @@ test("ignores benign invalidation errors nested inside plain objects", async () 
 
   assert.equal(instance.api.migrationState.failed, false);
   assert.equal(instance.errors.length, 0);
+});
+
+test("dispatches Word Online paste through a short debugger session", async () => {
+  const calls = [];
+  const instance = loadBackground({
+    debugger: {
+      attach: async function (target, version) {
+        calls.push(["attach", target.tabId, version]);
+      },
+      sendCommand: async function (target, command, payload) {
+        calls.push(["sendCommand", target.tabId, command, payload.type, payload.key || ""]);
+      },
+      detach: async function (target) {
+        calls.push(["detach", target.tabId]);
+      },
+    },
+  });
+
+  const result = await instance.api.pasteWithDebugger({ tab: { id: 42 } });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.pasted, true);
+  assert.deepEqual(calls[0], ["attach", 42, "1.3"]);
+  assert.deepEqual(calls.at(-1), ["detach", 42]);
+  assert.equal(
+    calls.some(function (call) {
+      return call[2] === "Input.dispatchKeyEvent" && call[4] === "v";
+    }),
+    true
+  );
+});
+
+test("inserts Word Online plain text through CDP Input.insertText", async () => {
+  const calls = [];
+  const instance = loadBackground({
+    debugger: {
+      attach: async function (target, version) {
+        calls.push(["attach", target.tabId, version]);
+      },
+      sendCommand: async function (target, command, payload) {
+        calls.push(["sendCommand", target.tabId, command, payload.text]);
+      },
+      detach: async function (target) {
+        calls.push(["detach", target.tabId]);
+      },
+    },
+  });
+
+  const result = await instance.api.insertTextWithDebugger(
+    { tab: { id: 7 } },
+    { text: "Texto expandido" }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.inserted, true);
+  assert.deepEqual(calls[0], ["attach", 7, "1.3"]);
+  assert.deepEqual(calls[1], ["sendCommand", 7, "Input.insertText", "Texto expandido"]);
+  assert.deepEqual(calls[2], ["detach", 7]);
 });

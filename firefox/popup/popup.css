@@ -1,0 +1,211 @@
+:root {
+  --tjpr-navy-900: #0d1b2a;
+  --tjpr-navy-800: #1b263b;
+  --tjpr-navy-700: #415a77;
+  --tjpr-navy-600: #778da9;
+  --tjpr-navy-500: #90a9c9;
+  --tjpr-gold: #d4af37;
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-500: #64748b;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --text: #0f172a;
+  --surface: #ffffff;
+  --shadow-lg: 0 18px 45px rgba(13, 27, 42, 0.2);
+  --shadow-md: 0 10px 24px rgba(13, 27, 42, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 320px;
+  padding: 14px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 14% 8%, rgba(212, 175, 55, 0.22), transparent 28%),
+    linear-gradient(135deg, var(--tjpr-navy-900) 0%, var(--tjpr-navy-800) 56%, var(--tjpr-navy-700) 100%);
+  -webkit-font-smoothing: antialiased;
+}
+
+.popup-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 92px;
+  padding: 16px 14px 18px;
+  color: #ffffff;
+  border-radius: 16px 16px 10px 10px;
+  box-shadow: var(--shadow-lg);
+}
+
+.brand-mark {
+  display: grid;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(212, 175, 55, 0.48);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
+  color: #f5d66d;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.eyebrow {
+  margin: 0 0 3px;
+  color: #d7e2ee;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+.subtitle {
+  margin: 5px 0 0;
+  color: rgba(248, 250, 252, 0.86);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.popup-card {
+  margin-top: -8px;
+  padding: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+#open-dashboard {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: var(--tjpr-navy-800);
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(27, 38, 59, 0.18);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  padding: 11px 12px;
+  cursor: pointer;
+  transition: transform 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+#open-dashboard:hover {
+  background: var(--tjpr-navy-700);
+  box-shadow: 0 10px 22px rgba(27, 38, 59, 0.24);
+  transform: translateY(-1px);
+}
+
+#open-dashboard:active {
+  transform: translateY(0);
+}
+
+#open-dashboard:focus-visible,
+.recent-item:focus-visible {
+  outline: 3px solid rgba(212, 175, 55, 0.36);
+  outline-offset: 2px;
+}
+
+.recentes {
+  margin-top: 15px;
+}
+
+.recentes h2 {
+  margin: 0 0 9px;
+  color: var(--slate-700);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+#recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 44px;
+}
+
+.recent-item {
+  width: 100%;
+  text-align: left;
+  padding: 10px 11px;
+  border: 1px solid var(--slate-200);
+  border-left: 3px solid var(--tjpr-gold);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, var(--slate-50) 100%);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.recent-item:hover {
+  border-color: rgba(65, 90, 119, 0.42);
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.recent-name {
+  display: block;
+  color: var(--slate-800);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.recent-shortcut {
+  display: block;
+  margin-top: 4px;
+  color: var(--tjpr-navy-700);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed var(--slate-200);
+  border-radius: 10px;
+  background: var(--slate-50);
+  color: var(--slate-700);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 0 2px;
+  text-align: center;
+  color: rgba(248, 250, 252, 0.78);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+footer span:last-child {
+  text-align: right;
+}
