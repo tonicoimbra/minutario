@@ -7,6 +7,8 @@ const SYNC_INTERVAL_MINUTES = 5;
 const QUICK_ACCESS_WINDOW_WIDTH = 1120;
 const QUICK_ACCESS_WINDOW_HEIGHT = 760;
 const TEXT_EXPANDER_LOG_PREFIX = "[TextExpander-Firefox]";
+const MINUTARIO_DEBUG_LOGS =
+  typeof MinutarioConfig !== "undefined" && !!MinutarioConfig.DEBUG_LOGS;
 
 const migrationState = {
   failed: false,
@@ -60,6 +62,10 @@ function getErrorMessage(exception) {
 }
 
 function textExpanderLog(message, details) {
+  if (!MINUTARIO_DEBUG_LOGS) {
+    return;
+  }
+
   if (!console || typeof console.log !== "function") {
     return;
   }
@@ -304,7 +310,7 @@ async function performSync() {
       return { updated: false, error: "Sync module not available" };
     }
 
-    const result = await MinutarioSync.syncTemplates(userId);
+    const result = await MinutarioSync.syncTemplates(userId, { forceFullPull: true });
 
     if (result.success) {
       const tabs = await browser.tabs.query({});

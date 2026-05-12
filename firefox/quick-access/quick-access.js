@@ -271,7 +271,7 @@
   }
 
   async function requestTemplates() {
-    var response = await browser.runtime.sendMessage({
+    var response = await chrome.runtime.sendMessage({
       type: "GET_TEMPLATES",
       payload: {},
     });
@@ -282,7 +282,7 @@
   }
 
   async function requestFolders() {
-    var response = await browser.runtime.sendMessage({ type: "GET_FOLDERS" });
+    var response = await chrome.runtime.sendMessage({ type: "GET_FOLDERS" });
     if (!response || !response.ok || !Array.isArray(response.data)) {
       throw new Error(response && response.error ? response.error : "Falha ao carregar pastas");
     }
@@ -290,7 +290,7 @@
   }
 
   async function requestRecentIds() {
-    var response = await browser.runtime.sendMessage({ type: "GET_RECENT" });
+    var response = await chrome.runtime.sendMessage({ type: "GET_RECENT" });
     if (!response || !response.ok || !Array.isArray(response.data)) {
       return [];
     }
@@ -422,7 +422,7 @@
       state.syncLabel = "Sincronizando...";
       render();
 
-      var response = await browser.runtime.sendMessage({ type: "FORCE_SYNC" });
+      var response = await chrome.runtime.sendMessage({ type: "FORCE_SYNC" });
       if (response && response.ok && response.data && response.data.updated) {
         await hydrateData();
         state.syncLabel = "Atualizado";
@@ -430,16 +430,16 @@
         return;
       }
 
-      state.syncLabel = "Cache local";
+      state.syncLabel = response && response.data && response.data.error ? "Erro: " + response.data.error : "Erro ao sincronizar";
       render();
     } catch (error) {
-      state.syncLabel = "Cache local";
+      state.syncLabel = "Erro ao sincronizar";
       render();
     }
   }
 
   function openDashboard() {
-    browser.tabs.create({ url: browser.runtime.getURL("dashboard/dashboard.html") });
+    chrome.tabs.create({ url: chrome.runtime.getURL("dashboard/dashboard.html") });
   }
 
   function bindEvents() {

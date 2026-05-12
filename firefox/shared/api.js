@@ -80,6 +80,21 @@
     });
   }
 
+  function getTemplateByShortcut(userId, shortcut) {
+    var client = getClient();
+    if (!client) return Promise.reject(new Error("Supabase client not available"));
+    return client
+      .from(CONFIG.TEMPLATES_TABLE)
+      .select("*")
+      .eq("user_id", userId)
+      .eq("shortcut", shortcut)
+      .limit(1)
+      .then(function (response) {
+        if (response.error) throw response.error;
+        return response.data && response.data.length ? response.data[0] : null;
+      });
+  }
+
   function updateTemplate(id, updates) {
     var client = getClient();
     if (!client) return Promise.reject(new Error("Supabase client not available"));
@@ -149,6 +164,7 @@
   global.MinutarioAPI = {
     getClient: getClient,
     getTemplates: getTemplates,
+    getTemplateByShortcut: getTemplateByShortcut,
     createTemplate: createTemplate,
     updateTemplate: updateTemplate,
     deleteTemplate: deleteTemplate,

@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", function () {
   var togglePasswordFormBtn = document.getElementById("toggle-password-form");
   var passwordForm = document.getElementById("password-form");
   var cancelPasswordBtn = document.getElementById("cancel-password-btn");
+  var forgotPasswordBtn = document.getElementById("forgot-password");
 
   if (loginForm) {
     loginForm.addEventListener("submit", handleLogin);
@@ -48,17 +49,28 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  if (forgotPasswordBtn) {
+    forgotPasswordBtn.addEventListener("click", handleForgotPassword);
+  }
+
   setPopupVersion();
   checkAuth();
 });
+
+function getExtensionApi() {
+  if (typeof browser !== "undefined") return browser;
+  if (typeof chrome !== "undefined") return chrome;
+  return null;
+}
 
 function setPopupVersion() {
   var versionEl = document.getElementById("app-version");
   if (!versionEl) return;
 
   try {
-    var manifest = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getManifest
-      ? chrome.runtime.getManifest()
+    var extensionApi = getExtensionApi();
+    var manifest = extensionApi && extensionApi.runtime && extensionApi.runtime.getManifest
+      ? extensionApi.runtime.getManifest()
       : null;
     var version = manifest && manifest.version ? String(manifest.version) : null;
     versionEl.textContent = version ? "v" + version : "v-";
@@ -207,18 +219,85 @@ async function handleLogin(event) {
 
     var userId = user && user.id ? user.id : null;
     if (userId) {
-      await chrome.storage.local.set({ minutario_user_id: userId });
+      var extensionApi = getExtensionApi();
+      var previous = null;
+      if (extensionApi && extensionApi.storage && extensionApi.storage.local) {
+        var stored = await extensionApi.storage.local.get("minutario_user_id");
+        previous = stored && stored.minutario_user_id ? stored.minutario_user_id : null;
+      }
+
+      if (window.MinutarioSync && window.MinutarioSync.prepareUserContext) {
+        var switched = await window.MinutarioSync.prepareUserContext(userId, previous);
+        if (switched && window.MinutarioSync.fullSync) {
+          await window.MinutarioSync.fullSync(userId, { skipUserContext: true });
+        }
+      }
+
+      if (extensionApi && extensionApi.storage && extensionApi.storage.local) {
+        await extensionApi.storage.local.set({ minutario_user_id: userId });
+      }
     }
 
-    if (errorEl) errorEl.textContent = "";
+    if (errorEl) {
+      errorEl.style.color = "";
+      errorEl.textContent = "";
+    }
     showDashboard(user);
   } catch (err) {
     if (errorEl) {
+      errorEl.style.color = "#dc2626";
       var message = err && err.message ? String(err.message) : "Erro ao fazer login";
       if (/invalid login credentials/i.test(message)) {
         message = "Credenciais inválidas. Confirme com o administrador.";
       }
       errorEl.textContent = message;
+    }
+  }
+}
+
+async function handleForgotPassword() {
+  var emailEl = document.getElementById("login-email");
+  var errorEl = document.getElementById("login-error");
+  var email = emailEl ? emailEl.value.trim() : "";
+
+  if (!email) {
+    if (errorEl) {
+      errorEl.style.color = "#dc2626";
+      errorEl.textContent = "Informe seu email para recuperar a senha.";
+    }
+    return;
+  }
+
+  try {
+    var client = window.MinutarioAPI.getClient();
+    if (!client) {
+      throw new Error("Cliente Supabase não disponível");
+    }
+
+    var config = window.MinutarioConfig || {};
+    var extensionApi = getExtensionApi();
+    var fallbackRedirect =
+      extensionApi && extensionApi.runtime && extensionApi.runtime.getURL
+        ? extensionApi.runtime.getURL("password-reset/password-reset.html")
+        : "";
+    var redirectTo = config.PASSWORD_RESET_REDIRECT_URL || fallbackRedirect;
+
+    var result = await client.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectTo,
+    });
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (errorEl) {
+      errorEl.style.color = "#047857";
+      errorEl.textContent = "Enviamos um link de redefinição para seu email.";
+    }
+  } catch (err) {
+    if (errorEl) {
+      errorEl.style.color = "#dc2626";
+      errorEl.textContent = err && err.message ? err.message : "Erro ao enviar email de recuperação.";
     }
   }
 }
@@ -234,7 +313,10 @@ async function handleLogout() {
   }
 
   clearTokens();
-  await chrome.storage.local.remove("minutario_user_id");
+  var extensionApi = getExtensionApi();
+  if (extensionApi && extensionApi.storage && extensionApi.storage.local) {
+    await extensionApi.storage.local.remove("minutario_user_id");
+  }
   hidePasswordForm();
   setAccountStatus("");
   showLogin();
@@ -279,15 +361,17 @@ async function handleChangePassword(event) {
 }
 
 function openQuickAccess() {
-  chrome.runtime.sendMessage({
+  var extensionApi = getExtensionApi();
+  extensionApi.runtime.sendMessage({
     type: "OPEN_QUICK_ACCESS",
     payload: { focusExisting: true },
   });
 }
 
 function openDashboard() {
-  var url = chrome.runtime.getURL("dashboard/dashboard.html");
-  chrome.tabs.create({ url: url });
+  var extensionApi = getExtensionApi();
+  var url = extensionApi.runtime.getURL("dashboard/dashboard.html");
+  extensionApi.tabs.create({ url: url });
 }
 
 async function forceSync() {
@@ -295,13 +379,16 @@ async function forceSync() {
   if (statusEl) statusEl.textContent = "Sincronizando...";
 
   try {
-    var response = await chrome.runtime.sendMessage({ type: "FORCE_SYNC" });
+    var extensionApi = getExtensionApi();
+    var response = await extensionApi.runtime.sendMessage({ type: "FORCE_SYNC" });
     if (response.ok && response.data && response.data.updated) {
       if (statusEl)
         statusEl.textContent =
           "Sincronizado (" + (response.data.count || 0) + " templates)";
+    } else if (response.ok && response.data && response.data.error) {
+      if (statusEl) statusEl.textContent = "Erro: " + response.data.error;
     } else if (response.ok) {
-      if (statusEl) statusEl.textContent = "Sem alterações";
+      if (statusEl) statusEl.textContent = "Erro na sincronização";
     } else {
       if (statusEl)
         statusEl.textContent = "Erro: " + (response.error || "desconhecido");
@@ -313,7 +400,8 @@ async function forceSync() {
 
 async function copyWordProbe() {
   try {
-    var stored = await chrome.storage.local.get("minutario_last_word_probe");
+    var extensionApi = getExtensionApi();
+    var stored = await extensionApi.storage.local.get("minutario_last_word_probe");
     var probe = stored && stored.minutario_last_word_probe;
 
     if (!probe) {
@@ -340,7 +428,8 @@ async function copyWordProbe() {
 
 async function updateSyncStatus() {
   try {
-    var response = await chrome.runtime.sendMessage({ type: "GET_SYNC_STATE" });
+    var extensionApi = getExtensionApi();
+    var response = await extensionApi.runtime.sendMessage({ type: "GET_SYNC_STATE" });
     if (response.ok && response.data) {
       var state = response.data.state;
       var statusEl = document.getElementById("sync-status");
@@ -360,7 +449,8 @@ async function updateSyncStatus() {
 
 // Recent templates (existing functionality)
 async function loadRecentTemplates(container) {
-  var localData = await chrome.storage.local.get("recent");
+  var extensionApi = getExtensionApi();
+  var localData = await extensionApi.storage.local.get("recent");
   var recent = Array.isArray(localData.recent)
     ? localData.recent.slice(0, 3)
     : [];
@@ -372,7 +462,7 @@ async function loadRecentTemplates(container) {
 
   var allTemplatesResponse;
   try {
-    allTemplatesResponse = await chrome.runtime.sendMessage({ type: "GET_TEMPLATES", payload: {} });
+    allTemplatesResponse = await extensionApi.runtime.sendMessage({ type: "GET_TEMPLATES", payload: {} });
   } catch (e) {
     renderEmptyState(container);
     return;

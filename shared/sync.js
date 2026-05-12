@@ -5,6 +5,24 @@
 
   var syncState = "idle";
   var listeners = [];
+  var CURRENT_USER_META_KEY = "minutario_current_user_id";
+
+  function debugLog(message, details) {
+    if (!CONFIG.DEBUG_LOGS || !global.console || typeof global.console.log !== "function") {
+      return;
+    }
+
+    if (typeof details === "undefined") {
+      global.console.log("[MinutarioSync] " + message);
+      return;
+    }
+
+    global.console.log("[MinutarioSync] " + message, details);
+  }
+
+  function getLastSyncKey(userId) {
+    return String(CONFIG.LAST_SYNC_KEY || "minutario_last_sync") + ":" + String(userId || "anonymous");
+  }
 
   function setState(newState) {
     syncState = newState;
@@ -69,6 +87,48 @@
     });
 
     return Object.values(merged);
+  }
+
+  function filterTemplatesForUser(templates, userId) {
+    return (templates || []).filter(function (template) {
+      return !template.user_id || template.user_id === userId;
+    });
+  }
+
+  function filterFoldersForUser(folders, userId) {
+    return (folders || []).filter(function (folder) {
+      return !folder.user_id || folder.user_id === userId;
+    });
+  }
+
+  async function clearLocalData() {
+    await DB.deleteAllTemplates();
+    if (DB.deleteAllFolders) {
+      await DB.deleteAllFolders();
+    }
+  }
+
+  async function prepareUserContext(userId, previousUserId) {
+    var storedUserId = await DB.getMeta(CURRENT_USER_META_KEY);
+    var effectivePreviousUserId = previousUserId || storedUserId || null;
+
+    if (effectivePreviousUserId && effectivePreviousUserId !== userId) {
+      debugLog("User switch detected. Clearing local IndexedDB before full sync.", {
+        previousUserId: effectivePreviousUserId,
+        nextUserId: userId,
+      });
+
+      await clearLocalData();
+      await DB.setMeta(getLastSyncKey(userId), null);
+      await DB.setMeta(CURRENT_USER_META_KEY, userId);
+      return true;
+    }
+
+    if (!storedUserId) {
+      await DB.setMeta(CURRENT_USER_META_KEY, userId);
+    }
+
+    return false;
   }
 
   function toMillis(value) {
@@ -149,7 +209,9 @@
     }
   }
 
-  async function syncTemplates(userId) {
+  async function syncTemplates(userId, options) {
+    options = options || {};
+
     if (!DB || !API) {
       setState("error");
       throw new Error("MinutarioDB or MinutarioAPI not available");
@@ -158,17 +220,35 @@
     setState("syncing");
 
     try {
-      var lastSync = await DB.getMeta(CONFIG.LAST_SYNC_KEY);
-      var localTemplates = await DB.getAllTemplates();
-      var localFolders = DB.getAllFolders ? await DB.getAllFolders() : [];
+      if (!options.skipUserContext) {
+        var userChanged = await prepareUserContext(userId, options.previousUserId);
+        if (userChanged) {
+          return await fullSync(userId, { skipUserContext: true });
+        }
+      }
+
+      var lastSyncKey = getLastSyncKey(userId);
+      var lastSync = await DB.getMeta(lastSyncKey);
+      var localTemplates = filterTemplatesForUser(await DB.getAllTemplates(), userId);
+      var localFolders = filterFoldersForUser(DB.getAllFolders ? await DB.getAllFolders() : [], userId);
       var remoteTemplatesFull = await API.getTemplates(userId);
+
+      debugLog("Starting incremental sync.", {
+        userId: userId,
+        lastSyncKey: lastSyncKey,
+        lastSync: lastSync || null,
+        localCount: localTemplates.length,
+        remoteCount: remoteTemplatesFull.length,
+      });
 
       await pushLocalTemplates(userId, localTemplates, remoteTemplatesFull);
 
-      localTemplates = await DB.getAllTemplates();
-      localFolders = DB.getAllFolders ? await DB.getAllFolders() : [];
+      localTemplates = filterTemplatesForUser(await DB.getAllTemplates(), userId);
+      localFolders = filterFoldersForUser(DB.getAllFolders ? await DB.getAllFolders() : [], userId);
 
-      var remoteTemplates = await API.getTemplates(userId, { since: lastSync });
+      var remoteTemplates = options.forceFullPull
+        ? await API.getTemplates(userId)
+        : await API.getTemplates(userId, { since: lastSync });
       var remoteFolders = await API.getFolders(userId);
 
       var merged = mergeTemplates(localTemplates, remoteTemplates);
@@ -187,16 +267,20 @@
       }
 
       var now = new Date().toISOString();
-      await DB.setMeta(CONFIG.LAST_SYNC_KEY, now);
+      await DB.setMeta(lastSyncKey, now);
+      await DB.setMeta(CURRENT_USER_META_KEY, userId);
       setState("updated");
       return { success: true, count: merged.length, folderCount: mergedFolders.length };
     } catch (err) {
+      debugLog("Sync failed.", { userId: userId, error: err && err.message ? err.message : String(err) });
       setState("offline");
       return { success: false, error: err.message };
     }
   }
 
-  async function fullSync(userId) {
+  async function fullSync(userId, options) {
+    options = options || {};
+
     if (!DB || !API) {
       setState("error");
       throw new Error("MinutarioDB or MinutarioAPI not available");
@@ -205,30 +289,43 @@
     setState("syncing");
 
     try {
-      var remoteTemplates = await API.getTemplates(userId);
-      var remoteFolders = await API.getFolders(userId);
-      await DB.deleteAllTemplates();
-      if (DB.deleteAllFolders) {
-        await DB.deleteAllFolders();
+      if (!options.skipUserContext) {
+        await prepareUserContext(userId, options.previousUserId);
       }
 
+      var lastSyncKey = getLastSyncKey(userId);
+      var remoteTemplates = await API.getTemplates(userId);
+      var remoteFolders = await API.getFolders(userId);
+
+      debugLog("Starting full sync.", {
+        userId: userId,
+        lastSyncKey: lastSyncKey,
+        remoteCount: remoteTemplates.length,
+        remoteFolderCount: remoteFolders.length,
+      });
+
+      await clearLocalData();
+
       for (var i = 0; i < remoteTemplates.length; i++) {
-        await DB.putTemplate(remoteTemplates[i]);
+        await DB.putTemplate(Object.assign({}, remoteTemplates[i], { user_id: userId }));
       }
 
       for (var j = 0; j < remoteFolders.length; j++) {
+        var folder = Object.assign({}, remoteFolders[j], { user_id: userId });
         if (DB.putFolder) {
-          await DB.putFolder(remoteFolders[j]);
+          await DB.putFolder(folder);
         } else if (DB.saveFolder) {
-          await DB.saveFolder(remoteFolders[j]);
+          await DB.saveFolder(folder);
         }
       }
 
       var now = new Date().toISOString();
-      await DB.setMeta(CONFIG.LAST_SYNC_KEY, now);
+      await DB.setMeta(lastSyncKey, now);
+      await DB.setMeta(CURRENT_USER_META_KEY, userId);
       setState("updated");
       return { success: true, count: remoteTemplates.length, folderCount: remoteFolders.length };
     } catch (err) {
+      debugLog("Full sync failed.", { userId: userId, error: err && err.message ? err.message : String(err) });
       setState("offline");
       return { success: false, error: err.message };
     }
@@ -239,6 +336,8 @@
     fullSync: fullSync,
     onSyncStateChange: onSyncStateChange,
     getSyncState: getSyncState,
+    prepareUserContext: prepareUserContext,
+    getLastSyncKey: getLastSyncKey,
     mergeTemplates: mergeTemplates,
     mergeFolders: mergeFolders,
   };

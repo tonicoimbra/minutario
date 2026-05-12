@@ -2,6 +2,8 @@
   "use strict";
 
   var CACHE_NAME = "minutario-dashboard-v1";
+  var protocol = (self.location && self.location.protocol) || "";
+  var isExtensionProtocol = protocol === "chrome-extension:" || protocol === "moz-extension:";
 
   var STATIC_ASSETS = [
     "/dashboard/index.html",
@@ -16,11 +18,13 @@
   ];
 
   self.addEventListener("install", function(event) {
-    event.waitUntil(
-      caches.open(CACHE_NAME).then(function(cache) {
-        return cache.addAll(STATIC_ASSETS);
-      })
-    );
+    if (!isExtensionProtocol) {
+      event.waitUntil(
+        caches.open(CACHE_NAME).then(function(cache) {
+          return cache.addAll(STATIC_ASSETS);
+        })
+      );
+    }
     self.skipWaiting();
   });
 
@@ -40,6 +44,10 @@
   });
 
   self.addEventListener("fetch", function(event) {
+    if (isExtensionProtocol || event.request.method !== "GET") {
+      return;
+    }
+
     event.respondWith(
       caches.match(event.request).then(function(cachedResponse) {
         if (cachedResponse) {

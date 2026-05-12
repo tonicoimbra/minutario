@@ -30,6 +30,7 @@
     els.toast = document.getElementById("toast");
     els.importCsvInput = document.getElementById("import-csv");
     els.exportCsvBtn = document.getElementById("export-csv");
+    els.supabaseSyncBtn = document.getElementById("supabase-sync");
     els.importStatus = document.getElementById("import-status");
 
     // Editor elements
@@ -146,16 +147,16 @@
   }
 
   function notifyTemplatesUpdated() {
-    if (!window.browser || !browser.tabs || !browser.tabs.query || !browser.tabs.sendMessage) {
+    if (!window.chrome || !chrome.tabs || !chrome.tabs.query || !chrome.tabs.sendMessage) {
       return Promise.resolve();
     }
 
-    return browser.tabs.query({}).then(function(tabs) {
+    return chrome.tabs.query({}).then(function(tabs) {
       return Promise.all((tabs || []).map(function(tab) {
         if (typeof tab.id !== "number") {
           return Promise.resolve();
         }
-        return browser.tabs.sendMessage(tab.id, { type: "TEMPLATES_UPDATED" }).catch(function() {
+        return chrome.tabs.sendMessage(tab.id, { type: "TEMPLATES_UPDATED" }).catch(function() {
           return undefined;
         });
       }));
@@ -193,8 +194,8 @@ function getUserIdFromUser(user) {
     var storedUserId = localStorage.getItem("minutario_user_id");
     if (storedUserId) return storedUserId;
 
-    if (window.browser && browser.storage && browser.storage.local && browser.storage.local.get) {
-      var result = await browser.storage.local.get("minutario_user_id");
+    if (window.chrome && chrome.storage && chrome.storage.local && chrome.storage.local.get) {
+      var result = await chrome.storage.local.get("minutario_user_id");
       return result && result.minutario_user_id ? result.minutario_user_id : null;
     }
 
@@ -203,11 +204,18 @@ function getUserIdFromUser(user) {
 
   async function saveUserId(value) {
     if (!value) return;
+
+    var previousUserId = await getStoredUserId();
+
+    if (window.MinutarioSync && window.MinutarioSync.prepareUserContext) {
+      await window.MinutarioSync.prepareUserContext(value, previousUserId);
+    }
+
     userId = value;
     localStorage.setItem("minutario_user_id", value);
 
-    if (window.browser && browser.storage && browser.storage.local && browser.storage.local.set) {
-      await browser.storage.local.set({ minutario_user_id: value });
+    if (window.chrome && chrome.storage && chrome.storage.local && chrome.storage.local.set) {
+      await chrome.storage.local.set({ minutario_user_id: value });
     }
   }
 
@@ -279,6 +287,9 @@ function getUserIdFromUser(user) {
     try {
       if (window.MinutarioDB && window.MinutarioDB.getAllFolders) {
         allFolders = await window.MinutarioDB.getAllFolders();
+        allFolders = allFolders.filter(function(folder) {
+          return !userId || !folder.user_id || folder.user_id === userId;
+        });
       } else {
         allFolders = [];
       }
@@ -385,28 +396,61 @@ function getUserIdFromUser(user) {
     }
 
     try {
-      var localTemplates = await window.MinutarioDB.getAllTemplates();
-      allTemplates = localTemplates;
-      filterAndRender();
-
       if (userId && window.MinutarioSync && window.MinutarioSync.syncTemplates) {
-        window.MinutarioSync.syncTemplates(userId).then(function(result) {
-          if (result.success) {
-            return window.MinutarioDB.getAllTemplates();
-          }
-          return null;
-        }).then(function(templates) {
-          if (templates) {
-            allTemplates = templates;
-            filterAndRender();
-          }
-        }).catch(function(err) {
-          console.error("Sync error:", err);
-        });
+        var syncResult = await window.MinutarioSync.syncTemplates(userId);
+        if (syncResult && syncResult.success) {
+          allTemplates = await window.MinutarioDB.getAllTemplates();
+          allTemplates = allTemplates.filter(function(template) {
+            return !template.user_id || template.user_id === userId;
+          });
+          filterAndRender();
+          return;
+        }
+
+        showToast(syncResult && syncResult.error ? syncResult.error : "Erro ao sincronizar");
+        updateSyncBadge("error");
       }
+
+      var localTemplates = await window.MinutarioDB.getAllTemplates();
+      allTemplates = localTemplates.filter(function(template) {
+        return !userId || !template.user_id || template.user_id === userId;
+      });
+      filterAndRender();
     } catch (err) {
       console.error("Load templates error:", err);
       showToast("Erro ao carregar templates");
+    }
+  }
+
+  async function handleForceSync() {
+    try {
+      if (!userId) {
+        userId = await getStoredUserId();
+      }
+
+      if (!userId || !window.MinutarioSync || !window.MinutarioSync.syncTemplates) {
+        throw new Error("Usuário ou módulo de sync indisponível");
+      }
+
+      updateSyncBadge("syncing");
+      var result = await window.MinutarioSync.syncTemplates(userId, { forceFullPull: true });
+
+      if (!result || !result.success) {
+        throw new Error(result && result.error ? result.error : "Erro ao sincronizar");
+      }
+
+      await loadFolders();
+      allTemplates = await window.MinutarioDB.getAllTemplates();
+      allTemplates = allTemplates.filter(function(template) {
+        return !template.user_id || template.user_id === userId;
+      });
+      filterAndRender();
+      updateSyncBadge("updated");
+      showToast("Sincronizado com sucesso");
+    } catch (err) {
+      console.error("Force sync error:", err);
+      updateSyncBadge("error");
+      showToast(err && err.message ? err.message : "Erro ao sincronizar");
     }
   }
 
@@ -781,7 +825,41 @@ function getUserIdFromUser(user) {
         if (existing && window.MinutarioAPI.updateTemplate) {
           await window.MinutarioAPI.updateTemplate(tpl.id, tpl);
         } else if (!existing && window.MinutarioAPI.createTemplate) {
-          await window.MinutarioAPI.createTemplate(tpl);
+          try {
+            await window.MinutarioAPI.createTemplate(tpl);
+          } catch (apiErr) {
+            var isDuplicateShortcut =
+              apiErr &&
+              (apiErr.code === "23505" ||
+                /idx_templates_user_shortcut/i.test(String(apiErr.message || "")));
+
+            if (!isDuplicateShortcut || !window.MinutarioAPI.getTemplateByShortcut) {
+              throw apiErr;
+            }
+
+            var remoteTemplate = await window.MinutarioAPI.getTemplateByShortcut(userId, shortcut);
+            if (!remoteTemplate || !remoteTemplate.id) {
+              throw apiErr;
+            }
+
+            // Replace temporary local id with the canonical remote id and update remote content.
+            if (window.MinutarioDB && window.MinutarioDB.deleteTemplate) {
+              await window.MinutarioDB.deleteTemplate(tpl.id);
+            }
+
+            tpl.id = remoteTemplate.id;
+            tpl.created_at = remoteTemplate.created_at || tpl.created_at;
+            tpl.createdAt = remoteTemplate.createdAt || tpl.createdAt;
+
+            if (window.MinutarioDB && window.MinutarioDB.saveTemplate) {
+              await window.MinutarioDB.saveTemplate(tpl);
+            } else if (window.MinutarioDB && window.MinutarioDB.putTemplate) {
+              await window.MinutarioDB.putTemplate(tpl);
+            }
+
+            currentTemplateId = tpl.id;
+            await window.MinutarioAPI.updateTemplate(tpl.id, tpl);
+          }
         }
       }
 
@@ -1015,6 +1093,7 @@ function getUserIdFromUser(user) {
     if (els.newTemplateBtn) els.newTemplateBtn.addEventListener("click", handleNewTemplate);
     if (els.importCsvInput) els.importCsvInput.addEventListener("change", handleCsvImport);
     if (els.exportCsvBtn) els.exportCsvBtn.addEventListener("click", handleCsvExport);
+    if (els.supabaseSyncBtn) els.supabaseSyncBtn.addEventListener("click", handleForceSync);
     if (els.editorForm) els.editorForm.addEventListener("submit", handleSaveTemplate);
     if (els.deleteTemplateBtn) els.deleteTemplateBtn.addEventListener("click", handleDeleteTemplate);
     if (els.newFolderBtn) els.newFolderBtn.addEventListener("click", handleNewFolder);

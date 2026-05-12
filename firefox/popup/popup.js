@@ -5,66 +5,13 @@ document.addEventListener("DOMContentLoaded", function () {
   var forceSyncBtn = document.getElementById("force-sync");
   var copyWordProbeBtn = document.getElementById("copy-word-probe");
   var logoutBtn = document.getElementById("logout");
-  var toggleAuthBtn = document.getElementById("toggle-auth-mode");
-  var backToLoginBtn = document.getElementById("back-to-login");
+  var togglePasswordFormBtn = document.getElementById("toggle-password-form");
+  var passwordForm = document.getElementById("password-form");
+  var cancelPasswordBtn = document.getElementById("cancel-password-btn");
+  var forgotPasswordBtn = document.getElementById("forgot-password");
 
   if (loginForm) {
     loginForm.addEventListener("submit", handleLogin);
-  }
-
-  if (backToLoginBtn) {
-    backToLoginBtn.addEventListener("click", function() {
-      var loginSection = document.getElementById("login-section");
-      var confirmationSection = document.getElementById("confirmation-section");
-      if (confirmationSection) confirmationSection.classList.add("hidden");
-      if (loginSection) loginSection.classList.remove("hidden");
-
-      loginForm.dataset.mode = "login";
-      var loginBtn = document.getElementById("login-btn");
-      if (loginBtn) loginBtn.textContent = "Entrar";
-      if (toggleAuthBtn) toggleAuthBtn.textContent = "Não tem conta? Criar agora";
-
-      var confirmPwd = document.getElementById("login-password-confirm");
-      if (confirmPwd) {
-        confirmPwd.classList.add("hidden");
-        confirmPwd.removeAttribute("required");
-        confirmPwd.value = "";
-      }
-      var pwd = document.getElementById("login-password");
-      if (pwd) pwd.value = "";
-    });
-  }
-
-  if (toggleAuthBtn) {
-    toggleAuthBtn.addEventListener("click", function(e) {
-      e.preventDefault();
-      var isSignUp = loginForm.dataset.mode === "signup";
-      var loginBtn = document.getElementById("login-btn");
-      var errorEl = document.getElementById("login-error");
-      var confirmPwd = document.getElementById("login-password-confirm");
-
-      if (isSignUp) {
-        loginForm.dataset.mode = "login";
-        loginBtn.textContent = "Entrar";
-        toggleAuthBtn.textContent = "Não tem conta? Criar agora";
-        if (confirmPwd) {
-          confirmPwd.classList.add("hidden");
-          confirmPwd.removeAttribute("required");
-        }
-      } else {
-        loginForm.dataset.mode = "signup";
-        loginBtn.textContent = "Criar Conta";
-        toggleAuthBtn.textContent = "Já tem uma conta? Entrar";
-        if (confirmPwd) {
-          confirmPwd.classList.remove("hidden");
-          confirmPwd.setAttribute("required", "true");
-        }
-      }
-      if (errorEl) {
-        errorEl.textContent = "";
-        errorEl.style.color = "";
-      }
-    });
   }
 
   if (openQuickAccessBtn) {
@@ -87,8 +34,50 @@ document.addEventListener("DOMContentLoaded", function () {
     logoutBtn.addEventListener("click", handleLogout);
   }
 
+  if (togglePasswordFormBtn) {
+    togglePasswordFormBtn.addEventListener("click", togglePasswordForm);
+  }
+
+  if (passwordForm) {
+    passwordForm.addEventListener("submit", handleChangePassword);
+  }
+
+  if (cancelPasswordBtn) {
+    cancelPasswordBtn.addEventListener("click", function () {
+      hidePasswordForm();
+      setAccountStatus("");
+    });
+  }
+
+  if (forgotPasswordBtn) {
+    forgotPasswordBtn.addEventListener("click", handleForgotPassword);
+  }
+
+  setPopupVersion();
   checkAuth();
 });
+
+function getExtensionApi() {
+  if (typeof browser !== "undefined") return browser;
+  if (typeof chrome !== "undefined") return chrome;
+  return null;
+}
+
+function setPopupVersion() {
+  var versionEl = document.getElementById("app-version");
+  if (!versionEl) return;
+
+  try {
+    var extensionApi = getExtensionApi();
+    var manifest = extensionApi && extensionApi.runtime && extensionApi.runtime.getManifest
+      ? extensionApi.runtime.getManifest()
+      : null;
+    var version = manifest && manifest.version ? String(manifest.version) : null;
+    versionEl.textContent = version ? "v" + version : "v-";
+  } catch (err) {
+    versionEl.textContent = "v-";
+  }
+}
 
 function getStoredTokens() {
   return {
@@ -107,30 +96,23 @@ function clearTokens() {
   localStorage.removeItem("minutario_refresh_token");
 }
 
-function shouldFallbackToLogin(signUpError) {
-  var message = signUpError && signUpError.message ? String(signUpError.message) : "";
-  return /user already registered/i.test(message);
-}
-
 function showLogin() {
   var loginSection = document.getElementById("login-section");
   var dashboardSection = document.getElementById("dashboard-section");
-  var confirmationSection = document.getElementById("confirmation-section");
   if (loginSection) loginSection.classList.remove("hidden");
   if (dashboardSection) dashboardSection.classList.add("hidden");
-  if (confirmationSection) confirmationSection.classList.add("hidden");
+  hidePasswordForm();
+  setAccountStatus("");
 }
 
 function showDashboard(user) {
   var loginSection = document.getElementById("login-section");
   var dashboardSection = document.getElementById("dashboard-section");
-  var confirmationSection = document.getElementById("confirmation-section");
   var userEmailEl = document.getElementById("user-email");
   var recentList = document.getElementById("recent-list");
 
   if (loginSection) loginSection.classList.add("hidden");
   if (dashboardSection) dashboardSection.classList.remove("hidden");
-  if (confirmationSection) confirmationSection.classList.add("hidden");
 
   if (userEmailEl) {
     userEmailEl.textContent = user && user.email ? user.email : "Usuário";
@@ -141,6 +123,32 @@ function showDashboard(user) {
   }
 
   updateSyncStatus();
+}
+
+function setAccountStatus(message, isError) {
+  var statusEl = document.getElementById("account-status");
+  if (!statusEl) return;
+  statusEl.textContent = message || "";
+  statusEl.style.color = isError ? "#dc2626" : "";
+}
+
+function hidePasswordForm() {
+  var form = document.getElementById("password-form");
+  var newPassword = document.getElementById("new-password");
+  var confirmPassword = document.getElementById("confirm-password");
+  if (form) form.classList.add("hidden");
+  if (newPassword) newPassword.value = "";
+  if (confirmPassword) confirmPassword.value = "";
+}
+
+function togglePasswordForm() {
+  var form = document.getElementById("password-form");
+  if (!form) return;
+  var willShow = form.classList.contains("hidden");
+  form.classList.toggle("hidden", !willShow);
+  if (!willShow) {
+    hidePasswordForm();
+  }
 }
 
 function setWordProbeStatus(message, isError) {
@@ -187,7 +195,6 @@ async function handleLogin(event) {
   var email = document.getElementById("login-email").value.trim();
   var password = document.getElementById("login-password").value;
   var errorEl = document.getElementById("login-error");
-  var isSignUp = document.getElementById("login-form").dataset.mode === "signup";
 
   try {
     var client = window.MinutarioAPI.getClient();
@@ -195,46 +202,11 @@ async function handleLogin(event) {
       throw new Error("Cliente Supabase não disponível");
     }
 
-    var result;
-    if (isSignUp) {
-      var confirmPwd = document.getElementById("login-password-confirm").value;
-      if (password.length < 8) {
-        throw new Error("A senha deve ter pelo menos 8 caracteres");
-      }
-      if (password !== confirmPwd) {
-        throw new Error("As senhas não coincidem");
-      }
-
-      result = await client.auth.signUp({
-        email: email,
-        password: password,
-      });
-      if (result.error) {
-        if (shouldFallbackToLogin(result.error)) {
-          result = await client.auth.signInWithPassword({
-            email: email,
-            password: password,
-          });
-        } else {
-          throw result.error;
-        }
-      }
-      if (result.error) throw result.error;
-
-      if (!result.data.session) {
-        var loginSection = document.getElementById("login-section");
-        var confirmationSection = document.getElementById("confirmation-section");
-        if (loginSection) loginSection.classList.add("hidden");
-        if (confirmationSection) confirmationSection.classList.remove("hidden");
-        return;
-      }
-    } else {
-      result = await client.auth.signInWithPassword({
-        email: email,
-        password: password,
-      });
-      if (result.error) throw result.error;
-    }
+    var result = await client.auth.signInWithPassword({
+      email: email,
+      password: password,
+    });
+    if (result.error) throw result.error;
 
     var session = result.data.session;
     var user = result.data.user;
@@ -247,13 +219,86 @@ async function handleLogin(event) {
 
     var userId = user && user.id ? user.id : null;
     if (userId) {
-      await browser.storage.local.set({ minutario_user_id: userId });
+      var extensionApi = getExtensionApi();
+      var previous = null;
+      if (extensionApi && extensionApi.storage && extensionApi.storage.local) {
+        var stored = await extensionApi.storage.local.get("minutario_user_id");
+        previous = stored && stored.minutario_user_id ? stored.minutario_user_id : null;
+      }
+
+      if (window.MinutarioSync && window.MinutarioSync.prepareUserContext) {
+        var switched = await window.MinutarioSync.prepareUserContext(userId, previous);
+        if (switched && window.MinutarioSync.fullSync) {
+          await window.MinutarioSync.fullSync(userId, { skipUserContext: true });
+        }
+      }
+
+      if (extensionApi && extensionApi.storage && extensionApi.storage.local) {
+        await extensionApi.storage.local.set({ minutario_user_id: userId });
+      }
     }
 
-    if (errorEl) errorEl.textContent = "";
+    if (errorEl) {
+      errorEl.style.color = "";
+      errorEl.textContent = "";
+    }
     showDashboard(user);
   } catch (err) {
-    if (errorEl) errorEl.textContent = err.message || "Erro ao fazer login";
+    if (errorEl) {
+      errorEl.style.color = "#dc2626";
+      var message = err && err.message ? String(err.message) : "Erro ao fazer login";
+      if (/invalid login credentials/i.test(message)) {
+        message = "Credenciais inválidas. Confirme com o administrador.";
+      }
+      errorEl.textContent = message;
+    }
+  }
+}
+
+async function handleForgotPassword() {
+  var emailEl = document.getElementById("login-email");
+  var errorEl = document.getElementById("login-error");
+  var email = emailEl ? emailEl.value.trim() : "";
+
+  if (!email) {
+    if (errorEl) {
+      errorEl.style.color = "#dc2626";
+      errorEl.textContent = "Informe seu email para recuperar a senha.";
+    }
+    return;
+  }
+
+  try {
+    var client = window.MinutarioAPI.getClient();
+    if (!client) {
+      throw new Error("Cliente Supabase não disponível");
+    }
+
+    var config = window.MinutarioConfig || {};
+    var extensionApi = getExtensionApi();
+    var fallbackRedirect =
+      extensionApi && extensionApi.runtime && extensionApi.runtime.getURL
+        ? extensionApi.runtime.getURL("password-reset/password-reset.html")
+        : "";
+    var redirectTo = config.PASSWORD_RESET_REDIRECT_URL || fallbackRedirect;
+
+    var result = await client.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectTo,
+    });
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (errorEl) {
+      errorEl.style.color = "#047857";
+      errorEl.textContent = "Enviamos um link de redefinição para seu email.";
+    }
+  } catch (err) {
+    if (errorEl) {
+      errorEl.style.color = "#dc2626";
+      errorEl.textContent = err && err.message ? err.message : "Erro ao enviar email de recuperação.";
+    }
   }
 }
 
@@ -268,20 +313,65 @@ async function handleLogout() {
   }
 
   clearTokens();
-  await browser.storage.local.remove("minutario_user_id");
+  var extensionApi = getExtensionApi();
+  if (extensionApi && extensionApi.storage && extensionApi.storage.local) {
+    await extensionApi.storage.local.remove("minutario_user_id");
+  }
+  hidePasswordForm();
+  setAccountStatus("");
   showLogin();
 }
 
+async function handleChangePassword(event) {
+  event.preventDefault();
+
+  var newPasswordEl = document.getElementById("new-password");
+  var confirmPasswordEl = document.getElementById("confirm-password");
+
+  var newPassword = newPasswordEl ? newPasswordEl.value : "";
+  var confirmPassword = confirmPasswordEl ? confirmPasswordEl.value : "";
+
+  if (!newPassword || newPassword.length < 8) {
+    setAccountStatus("A nova senha deve ter pelo menos 8 caracteres.", true);
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setAccountStatus("A confirmação da senha não confere.", true);
+    return;
+  }
+
+  try {
+    var client = window.MinutarioAPI.getClient();
+    if (!client) {
+      throw new Error("Cliente Supabase não disponível");
+    }
+
+    var result = await client.auth.updateUser({ password: newPassword });
+    if (result.error) {
+      throw result.error;
+    }
+
+    hidePasswordForm();
+    setAccountStatus("Senha atualizada com sucesso.");
+  } catch (err) {
+    var message = err && err.message ? String(err.message) : "Erro ao atualizar senha.";
+    setAccountStatus(message, true);
+  }
+}
+
 function openQuickAccess() {
-  browser.runtime.sendMessage({
+  var extensionApi = getExtensionApi();
+  extensionApi.runtime.sendMessage({
     type: "OPEN_QUICK_ACCESS",
     payload: { focusExisting: true },
   });
 }
 
 function openDashboard() {
-  var url = browser.runtime.getURL("dashboard/dashboard.html");
-  browser.tabs.create({ url: url });
+  var extensionApi = getExtensionApi();
+  var url = extensionApi.runtime.getURL("dashboard/dashboard.html");
+  extensionApi.tabs.create({ url: url });
 }
 
 async function forceSync() {
@@ -289,13 +379,16 @@ async function forceSync() {
   if (statusEl) statusEl.textContent = "Sincronizando...";
 
   try {
-    var response = await browser.runtime.sendMessage({ type: "FORCE_SYNC" });
+    var extensionApi = getExtensionApi();
+    var response = await extensionApi.runtime.sendMessage({ type: "FORCE_SYNC" });
     if (response.ok && response.data && response.data.updated) {
       if (statusEl)
         statusEl.textContent =
           "Sincronizado (" + (response.data.count || 0) + " templates)";
+    } else if (response.ok && response.data && response.data.error) {
+      if (statusEl) statusEl.textContent = "Erro: " + response.data.error;
     } else if (response.ok) {
-      if (statusEl) statusEl.textContent = "Sem alterações";
+      if (statusEl) statusEl.textContent = "Erro na sincronização";
     } else {
       if (statusEl)
         statusEl.textContent = "Erro: " + (response.error || "desconhecido");
@@ -307,7 +400,8 @@ async function forceSync() {
 
 async function copyWordProbe() {
   try {
-    var stored = await browser.storage.local.get("minutario_last_word_probe");
+    var extensionApi = getExtensionApi();
+    var stored = await extensionApi.storage.local.get("minutario_last_word_probe");
     var probe = stored && stored.minutario_last_word_probe;
 
     if (!probe) {
@@ -334,7 +428,8 @@ async function copyWordProbe() {
 
 async function updateSyncStatus() {
   try {
-    var response = await browser.runtime.sendMessage({ type: "GET_SYNC_STATE" });
+    var extensionApi = getExtensionApi();
+    var response = await extensionApi.runtime.sendMessage({ type: "GET_SYNC_STATE" });
     if (response.ok && response.data) {
       var state = response.data.state;
       var statusEl = document.getElementById("sync-status");
@@ -354,7 +449,8 @@ async function updateSyncStatus() {
 
 // Recent templates (existing functionality)
 async function loadRecentTemplates(container) {
-  var localData = await browser.storage.local.get("recent");
+  var extensionApi = getExtensionApi();
+  var localData = await extensionApi.storage.local.get("recent");
   var recent = Array.isArray(localData.recent)
     ? localData.recent.slice(0, 3)
     : [];
@@ -366,7 +462,7 @@ async function loadRecentTemplates(container) {
 
   var allTemplatesResponse;
   try {
-    allTemplatesResponse = await browser.runtime.sendMessage({ type: "GET_TEMPLATES", payload: {} });
+    allTemplatesResponse = await extensionApi.runtime.sendMessage({ type: "GET_TEMPLATES", payload: {} });
   } catch (e) {
     renderEmptyState(container);
     return;

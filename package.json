@@ -5,10 +5,10 @@
   "type": "commonjs",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "check": "node --check background.js content.js popup/popup.js shared/api.js shared/sync.js dashboard/sync/supabase.js",
+    "check": "node --check background.js content.js popup/popup.js shared/api.js shared/sync.js shared/browser-compat.js dashboard/dashboard.js dashboard/sync/supabase.js password-reset/password-reset.js firefox/background.js",
     "pack:chrome": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-chrome.ps1",
-    "pack:firefox": "npx web-ext build --source-dir . --artifacts-dir dist/firefox --overwrite-dest --ignore-files \"tests/*\" \"docs/*\" \"supabase/*\" \"scripts/*\" \"node_modules/*\" \".codex/*\" \".superpowers/*\" \"dist/*\" \"*.md\"",
-    "sign:firefox": "npx web-ext sign --source-dir . --artifacts-dir dist/firefox --api-key %AMO_JWT_ISSUER% --api-secret %AMO_JWT_SECRET% --ignore-files \"tests/*\" \"docs/*\" \"supabase/*\" \"scripts/*\" \"node_modules/*\" \".codex/*\" \".superpowers/*\" \"dist/*\" \"*.md\"",
+    "pack:firefox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-firefox.ps1",
+    "sign:firefox": "npm run pack:firefox && npx web-ext sign --source-dir dist/firefox/minutario-firefox --artifacts-dir dist/firefox --api-key %AMO_JWT_ISSUER% --api-secret %AMO_JWT_SECRET%",
     "version:bump:patch": "node scripts/bump-version.js patch",
     "version:bump:minor": "node scripts/bump-version.js minor",
     "version:bump:major": "node scripts/bump-version.js major",

@@ -9,6 +9,7 @@
     FOLDERS_TABLE: "folders",
     LAST_SYNC_KEY: "minutario_last_sync",
     AUTH_TOKEN_KEY: "minutario_auth_token",
+    PASSWORD_RESET_REDIRECT_URL: "",
     DEBUG_LOGS: false,
   };
   global.MinutarioConfig = CONFIG;

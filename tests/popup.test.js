@@ -24,6 +24,7 @@ async function bootstrapPopup(options) {
   const localStorageArea = Object.assign({}, options.localStorageArea || {});
   const signInCalls = [];
   const updateUserCalls = [];
+  const resetPasswordCalls = [];
   const clipboardWrites = [];
 
   window.chrome = {
@@ -86,6 +87,10 @@ async function bootstrapPopup(options) {
             updateUserCalls.push(payload);
             return options.updateUserResult || { data: { user: { id: "user-1" } }, error: null };
           },
+          async resetPasswordForEmail(email, opts) {
+            resetPasswordCalls.push({ email, opts });
+            return options.resetPasswordResult || { data: {}, error: null };
+          },
           async signOut() {
             return {};
           },
@@ -93,11 +98,22 @@ async function bootstrapPopup(options) {
       };
     },
   };
+  window.MinutarioConfig = {
+    PASSWORD_RESET_REDIRECT_URL: options.passwordResetRedirectUrl || "",
+  };
+  window.MinutarioSync = {
+    async prepareUserContext() {
+      return false;
+    },
+    async fullSync() {
+      return { success: true };
+    },
+  };
 
   window.eval(popupSource);
   await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-  return { window, signInCalls, updateUserCalls, clipboardWrites };
+  return { window, signInCalls, updateUserCalls, resetPasswordCalls, clipboardWrites };
 }
 
 test("popup performs login-only flow and opens dashboard", async () => {
@@ -185,4 +201,20 @@ test("popup updates password for authenticated user", async () => {
   assert.equal(updateUserCalls.length, 1);
   assert.equal(updateUserCalls[0].password, "novaSenha123");
   assert.equal(window.document.getElementById("account-status").textContent, "Senha atualizada com sucesso.");
+});
+
+test("popup sends password reset email with configured redirect", async () => {
+  const { window, resetPasswordCalls } = await bootstrapPopup({
+    passwordResetRedirectUrl: "https://example.test/reset",
+  });
+
+  window.document.getElementById("login-email").value = "teste@example.com";
+  window.document.getElementById("forgot-password").click();
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(resetPasswordCalls.length, 1);
+  assert.equal(resetPasswordCalls[0].email, "teste@example.com");
+  assert.equal(resetPasswordCalls[0].opts.redirectTo, "https://example.test/reset");
+  assert.match(window.document.getElementById("login-error").textContent, /Enviamos um link/);
 });

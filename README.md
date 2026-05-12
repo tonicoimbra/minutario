@@ -140,12 +140,15 @@ Sincronização bidirecional em tempo real:
 3. No dashboard do Supabase, vá em **Project Settings → API** e copie:
    - **Project URL**
    - **anon/public** API key
-4. No arquivo `dashboard/sync/supabase.js`, substitua:
+4. No arquivo `shared/config.js`, substitua:
    ```js
-   var SUPABASE_URL = "https://sua-url-do-projeto.supabase.co";
-   var SUPABASE_ANON_KEY = "sua-anon-key";
+   SUPABASE_URL: "https://sua-url-do-projeto.supabase.co",
+   SUPABASE_ANON_KEY: "sua-anon-key",
+   PASSWORD_RESET_REDIRECT_URL: ""
    ```
 5. Recarregue a extensão em `chrome://extensions`
+
+Para recuperação de senha, configure `PASSWORD_RESET_REDIRECT_URL` se quiser fixar uma URL de reset. Se deixar vazio, a extensão usa `password-reset/password-reset.html` via `chrome.runtime.getURL()`/`browser.runtime.getURL()`. A URL final precisa estar cadastrada em **Supabase → Authentication → URL Configuration → Redirect URLs**.
 
 ### Usar
 
@@ -176,7 +179,8 @@ npm run release:pilot:full:minor   # 1.1.0 -> 1.2.0
 
 Artefatos gerados:
 - `dist/chrome/minutario-chrome-vX.Y.Z.zip`
-- `dist/firefox/*.zip` (build local para validação)
+- `dist/firefox/minutario-firefox-vX.Y.Z.zip`
+- `dist/firefox/minutario-firefox/` (pasta para teste temporário no Firefox)
 
 ### 2. Chrome (usuário final)
 
@@ -186,6 +190,8 @@ Artefatos gerados:
 4. Selecione a pasta da extensão
 
 ### 3. Firefox (usuário final)
+
+Para teste temporário, use `about:debugging` → **This Firefox** → **Load Temporary Add-on** → selecione `dist/firefox/minutario-firefox/manifest.json`.
 
 Para Firefox estável, distribua **somente .xpi assinado**.
 

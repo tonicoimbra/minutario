@@ -45,6 +45,7 @@ function bootstrapDashboard(html, options) {
   var deletedFolderId = null;
   var remoteDeletedTemplateId = null;
   var syncUserId = null;
+  var fullSyncUserId = null;
   var tabMessages = [];
   var savedTemplates = [];
   var downloadedFile = null;
@@ -243,8 +244,15 @@ function bootstrapDashboard(html, options) {
   };
   window.MinutarioSync = {
     onSyncStateChange() {},
+    async prepareUserContext() {
+      return false;
+    },
     async syncTemplates(userId) {
       syncUserId = userId;
+      return { success: true };
+    },
+    async fullSync(userId) {
+      fullSyncUserId = userId;
       return { success: true };
     },
   };
@@ -282,6 +290,7 @@ function bootstrapDashboard(html, options) {
       getDeletedFolderId: () => deletedFolderId,
       getRemoteDeletedTemplateId: () => remoteDeletedTemplateId,
       getUserId: () => syncUserId,
+      getFullSyncUserId: () => fullSyncUserId,
       getTabMessages: () => tabMessages.slice(),
     }), 20);
   });
@@ -484,6 +493,31 @@ test("dashboard notifies open tabs after saving a template", async () => {
     { tabId: 101, message: { type: "TEMPLATES_UPDATED" } },
     { tabId: 202, message: { type: "TEMPLATES_UPDATED" } },
   ]);
+});
+
+test("dashboard force sync hydrates local templates and reports success", async () => {
+  const template = {
+    id: "remote-1",
+    user_id: "user-app-id",
+    name: "Remoto",
+    shortcut: "remoto",
+    content: "<p>Remoto</p>",
+  };
+  const { window, getUserId } = await bootstrapDashboard(dashboardHtml, {
+    storedSession: true,
+    templates: [template],
+    apiUser: {
+      id: "user-app-id",
+      email: "test@example.com",
+    },
+  });
+
+  window.document.getElementById("supabase-sync").click();
+
+  await new Promise((resolve) => window.setTimeout(resolve, 30));
+
+  assert.equal(getUserId(), "user-app-id");
+  assert.match(window.document.getElementById("toast").textContent, /Sincronizado com sucesso/);
 });
 
 test("dashboard exports templates as a dated UTF-8 CSV download", async () => {

@@ -36,6 +36,7 @@
         "<all_urls>"
       ],
       "js": [
+        "shared/browser-compat.js",
         "shared/config.js",
         "shared/db.js",
         "shared/api.js",
@@ -55,6 +56,8 @@
         "dashboard/dashboard.js",
         "dashboard/dashboard.css",
         "dashboard/index.html",
+        "password-reset/password-reset.html",
+        "password-reset/password-reset.js",
         "quick-access/*",
         "shared/*",
         "lib/*"

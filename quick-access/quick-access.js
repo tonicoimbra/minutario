@@ -430,10 +430,10 @@
         return;
       }
 
-      state.syncLabel = "Cache local";
+      state.syncLabel = response && response.data && response.data.error ? "Erro: " + response.data.error : "Erro ao sincronizar";
       render();
     } catch (error) {
-      state.syncLabel = "Cache local";
+      state.syncLabel = "Erro ao sincronizar";
       render();
     }
   }

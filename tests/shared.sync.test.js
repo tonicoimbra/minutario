@@ -48,8 +48,10 @@ function bootstrap() {
     _folders: [],
     _created: [],
     _updated: [],
+    _getTemplateCalls: [],
     getTemplates: async function (orgId, options) {
       options = options || {};
+      this._getTemplateCalls.push({ orgId: orgId, options: options });
       if (options.since) {
         return this._templates.filter(function (t) {
           return t.updated_at >= options.since;
@@ -138,6 +140,9 @@ test("syncTemplates performs delta sync and updates meta", async () => {
   assert.equal(all[0].name, "Remote1");
 
   var lastSync = await global.MinutarioDB.getMeta("minutario_last_sync");
+  assert.equal(lastSync, undefined);
+
+  lastSync = await global.MinutarioDB.getMeta("minutario_last_sync:org1");
   assert.ok(lastSync);
 });
 
@@ -198,4 +203,46 @@ test("syncTemplates pushes local-only template to remote", async () => {
   assert.equal(result.success, true);
   assert.equal(global.MinutarioAPI._created.length, 1);
   assert.equal(global.MinutarioAPI._created[0].shortcut, "atalho-local");
+});
+
+test("syncTemplates forceFullPull fetches remote templates without since filter", async () => {
+  var Sync = bootstrap();
+  await global.MinutarioDB.setMeta("minutario_last_sync:org1", "2024-06-01T00:00:00Z");
+  global.MinutarioAPI._templates = [
+    { id: "remote-1", user_id: "org1", name: "Remote", shortcut: "remote", updated_at: "2024-06-01T00:00:00Z" },
+  ];
+
+  var result = await Sync.syncTemplates("org1", { forceFullPull: true });
+
+  assert.equal(result.success, true);
+  var lastCall = global.MinutarioAPI._getTemplateCalls[global.MinutarioAPI._getTemplateCalls.length - 1];
+  assert.deepEqual(lastCall.options, {});
+});
+
+test("syncTemplates full syncs and clears local data when user changes", async () => {
+  var Sync = bootstrap();
+
+  await global.MinutarioDB.setMeta("minutario_current_user_id", "user-a");
+  global.MinutarioDB._templates = [
+    { id: "a-local", user_id: "user-a", name: "A", shortcut: "a", updated_at: "2024-01-01T00:00:00Z" },
+  ];
+  global.MinutarioDB._folders = [
+    { id: "folder-a", user_id: "user-a", name: "Pasta A" },
+  ];
+  global.MinutarioAPI._templates = [
+    { id: "b-remote", user_id: "user-b", name: "B", shortcut: "b", updated_at: "2024-06-01T00:00:00Z" },
+  ];
+  global.MinutarioAPI._folders = [
+    { id: "folder-b", user_id: "user-b", name: "Pasta B" },
+  ];
+
+  var result = await Sync.syncTemplates("user-b");
+
+  assert.equal(result.success, true);
+  assert.equal(global.MinutarioDB._templates.length, 1);
+  assert.equal(global.MinutarioDB._templates[0].id, "b-remote");
+  assert.equal(global.MinutarioDB._folders.length, 1);
+  assert.equal(global.MinutarioDB._folders[0].id, "folder-b");
+  assert.equal(await global.MinutarioDB.getMeta("minutario_current_user_id"), "user-b");
+  assert.ok(await global.MinutarioDB.getMeta("minutario_last_sync:user-b"));
 });

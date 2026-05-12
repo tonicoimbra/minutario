@@ -40,17 +40,22 @@
         margin: 8px 0 0;
         min-height: 18px;
       }
-      .auth-toggle {
-        text-align: center;
+      .login-help {
+        display: flex;
+        justify-content: center;
         margin-top: 10px;
         font-size: 12px;
       }
-      .auth-toggle a {
-        color: var(--tjpr-navy-600);
-        text-decoration: none;
-        transition: color 150ms ease;
+      .login-help button {
+        border: 0;
+        background: transparent;
+        color: var(--tjpr-navy-700);
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12px;
+        padding: 0;
       }
-      .auth-toggle a:hover {
+      .login-help button:hover {
         color: var(--tjpr-navy-800);
         text-decoration: underline;
       }
@@ -135,6 +140,17 @@
         border-color: rgba(65, 90, 119, 0.42);
         transform: translateY(-1px);
       }
+      #toggle-password-form {
+        border: 1px solid var(--slate-200);
+        background: #ffffff;
+        color: var(--slate-700);
+        box-shadow: none;
+      }
+      #toggle-password-form:hover {
+        background: var(--slate-100);
+        border-color: rgba(65, 90, 119, 0.42);
+        transform: translateY(-1px);
+      }
       #copy-word-probe {
         border: 1px dashed rgba(65, 90, 119, 0.42);
         background: var(--slate-50);
@@ -153,6 +169,43 @@
         font-size: 11px;
         line-height: 1.35;
       }
+      .password-form {
+        margin: -4px 0 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .password-form input {
+        padding: 10px 12px;
+        border: 1px solid var(--slate-200);
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 13px;
+      }
+      .password-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .password-actions button {
+        flex: 1;
+      }
+      #save-password-btn {
+        border: 0;
+        background: var(--tjpr-navy-800);
+        color: #ffffff;
+      }
+      #cancel-password-btn {
+        border: 1px solid var(--slate-200);
+        background: var(--slate-100);
+        color: var(--slate-700);
+      }
+      .account-status {
+        margin: 0 2px 8px;
+        min-height: 16px;
+        color: var(--slate-500);
+        font-size: 11px;
+        line-height: 1.35;
+      }
     </style>
   </head>
   <body>
@@ -166,26 +219,18 @@
     </header>
 
     <section id="login-section" class="popup-card hidden">
-      <form id="login-form" class="login-form" data-mode="login">
+      <form id="login-form" class="login-form">
         <input type="email" id="login-email" placeholder="Email" required autocomplete="email" />
         <input type="password" id="login-password" placeholder="Senha" required autocomplete="current-password" />
-        <input type="password" id="login-password-confirm" placeholder="Confirmar Senha" autocomplete="new-password" class="hidden" />
         <button type="submit" id="login-btn">Entrar</button>
       </form>
-      <div class="auth-toggle">
-        <a href="#" id="toggle-auth-mode">Não tem conta? Criar agora</a>
+      <p style="margin: 10px 0 0; color: var(--slate-500); font-size: 11px; line-height: 1.35;">
+        Conta criada pelo administrador. Use seu email e senha.
+      </p>
+      <div class="login-help">
+        <button id="forgot-password" type="button">Esqueci minha senha</button>
       </div>
       <p id="login-error" class="login-error" aria-live="polite"></p>
-    </section>
-
-    <section id="confirmation-section" class="popup-card hidden">
-      <div style="text-align: center; padding: 10px 0;">
-        <h2 style="color: var(--tjpr-navy-800); margin-bottom: 10px; font-size: 18px;">Conta Criada!</h2>
-        <p style="font-size: 13px; color: var(--slate-700); margin-bottom: 20px; line-height: 1.4;">
-          Enviamos um email de confirmação para você.<br>Por favor, verifique sua caixa de entrada.
-        </p>
-        <button id="back-to-login" type="button" style="width: 100%; border: 0; border-radius: 10px; background: var(--tjpr-navy-800); color: #ffffff; padding: 11px 12px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 700;">Voltar ao Login</button>
-      </div>
     </section>
 
     <section id="dashboard-section" class="popup-card hidden">
@@ -197,9 +242,19 @@
         <button id="open-quick-access" type="button">Consulta Rápida</button>
         <button id="open-dashboard" type="button">Abrir Dashboard</button>
         <button id="force-sync" type="button">Sync Agora</button>
+        <button id="toggle-password-form" type="button">Trocar Senha</button>
         <button id="copy-word-probe" type="button">Copiar Diagnóstico Word</button>
         <button id="logout" type="button">Sair</button>
       </div>
+      <form id="password-form" class="password-form hidden">
+        <input type="password" id="new-password" placeholder="Nova senha (mín. 8 caracteres)" autocomplete="new-password" />
+        <input type="password" id="confirm-password" placeholder="Confirmar nova senha" autocomplete="new-password" />
+        <div class="password-actions">
+          <button id="save-password-btn" type="submit">Salvar senha</button>
+          <button id="cancel-password-btn" type="button">Cancelar</button>
+        </div>
+      </form>
+      <p id="account-status" class="account-status" aria-live="polite"></p>
       <p id="word-probe-status" class="word-probe-status" aria-live="polite"></p>
 
       <section class="recentes" aria-labelledby="recentes-label">
@@ -209,11 +264,12 @@
     </section>
 
     <footer>
-      <span>v1.1.0</span>
+      <span id="app-version">v-</span>
       <span>Desenvolvido por Elvertoni Coimbra</span>
     </footer>
 
     <script src="../lib/supabase.min.js"></script>
+    <script src="../shared/browser-compat.js"></script>
     <script src="../shared/config.js"></script>
     <script src="../shared/db.js"></script>
     <script src="../shared/api.js"></script>
