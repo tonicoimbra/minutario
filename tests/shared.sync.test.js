@@ -46,6 +46,8 @@ function bootstrap() {
   global.MinutarioAPI = {
     _templates: [],
     _folders: [],
+    _created: [],
+    _updated: [],
     getTemplates: async function (orgId, options) {
       options = options || {};
       if (options.since) {
@@ -57,6 +59,25 @@ function bootstrap() {
     },
     getFolders: async function () {
       return this._folders;
+    },
+    getTemplateByShortcut: async function (userId, shortcut) {
+      var normalized = String(shortcut || "").toLowerCase();
+      var found = this._templates.find(function (t) {
+        return String(t.shortcut || "").toLowerCase() === normalized;
+      });
+      return found || null;
+    },
+    createTemplate: async function (template) {
+      this._created.push(template);
+      this._templates.push(template);
+      return template;
+    },
+    updateTemplate: async function (id, updates) {
+      this._updated.push({ id: id, updates: updates });
+      this._templates = this._templates.map(function (t) {
+        return t.id === id ? Object.assign({}, t, updates) : t;
+      });
+      return updates;
     },
   };
 
@@ -105,7 +126,7 @@ test("mergeTemplates adds new remote templates", () => {
 test("syncTemplates performs delta sync and updates meta", async () => {
   var Sync = bootstrap();
   global.MinutarioAPI._templates = [
-    { id: "1", name: "Remote1", updated_at: "2024-06-01T00:00:00Z" },
+    { id: "1", name: "Remote1", shortcut: "remote1", updated_at: "2024-06-01T00:00:00Z" },
   ];
 
   var result = await Sync.syncTemplates("org1");
@@ -123,10 +144,10 @@ test("syncTemplates performs delta sync and updates meta", async () => {
 test("fullSync replaces all local with remote", async () => {
   var Sync = bootstrap();
   global.MinutarioDB._templates = [
-    { id: "old", name: "Old", updated_at: "2024-01-01T00:00:00Z" },
+    { id: "old", name: "Old", shortcut: "old", updated_at: "2024-01-01T00:00:00Z" },
   ];
   global.MinutarioAPI._templates = [
-    { id: "new", name: "New", updated_at: "2024-06-01T00:00:00Z" },
+    { id: "new", name: "New", shortcut: "new", updated_at: "2024-06-01T00:00:00Z" },
   ];
 
   var result = await Sync.fullSync("org1");
@@ -150,9 +171,31 @@ test("onSyncStateChange receives state updates", async () => {
     states.push(state);
   });
 
-  global.MinutarioAPI._templates = [{ id: "1", name: "A", updated_at: "2024-06-01T00:00:00Z" }];
+  global.MinutarioAPI._templates = [{ id: "1", name: "A", shortcut: "a", updated_at: "2024-06-01T00:00:00Z" }];
   await Sync.syncTemplates("org1");
 
   assert.ok(states.indexOf("syncing") !== -1);
   assert.ok(states.indexOf("updated") !== -1);
+});
+
+test("syncTemplates pushes local-only template to remote", async () => {
+  var Sync = bootstrap();
+  global.MinutarioDB._templates = [
+    {
+      id: "local-1",
+      user_id: "org1",
+      name: "Local only",
+      shortcut: "atalho-local",
+      content: "<p>conteudo</p>",
+      plain_text: "conteudo",
+      updated_at: "2024-06-02T00:00:00Z",
+    },
+  ];
+
+  global.MinutarioAPI._templates = [];
+
+  var result = await Sync.syncTemplates("org1");
+  assert.equal(result.success, true);
+  assert.equal(global.MinutarioAPI._created.length, 1);
+  assert.equal(global.MinutarioAPI._created[0].shortcut, "atalho-local");
 });

@@ -390,19 +390,11 @@ function getUserIdFromUser(user) {
       filterAndRender();
 
       if (userId && window.MinutarioSync && window.MinutarioSync.syncTemplates) {
-        window.MinutarioSync.syncTemplates(userId).then(function(result) {
-          if (result.success) {
-            return window.MinutarioDB.getAllTemplates();
-          }
-          return null;
-        }).then(function(templates) {
-          if (templates) {
-            allTemplates = templates;
-            filterAndRender();
-          }
-        }).catch(function(err) {
-          console.error("Sync error:", err);
-        });
+        var syncResult = await window.MinutarioSync.syncTemplates(userId);
+        if (syncResult && syncResult.success) {
+          allTemplates = await window.MinutarioDB.getAllTemplates();
+          filterAndRender();
+        }
       }
     } catch (err) {
       console.error("Load templates error:", err);
@@ -781,7 +773,41 @@ function getUserIdFromUser(user) {
         if (existing && window.MinutarioAPI.updateTemplate) {
           await window.MinutarioAPI.updateTemplate(tpl.id, tpl);
         } else if (!existing && window.MinutarioAPI.createTemplate) {
-          await window.MinutarioAPI.createTemplate(tpl);
+          try {
+            await window.MinutarioAPI.createTemplate(tpl);
+          } catch (apiErr) {
+            var isDuplicateShortcut =
+              apiErr &&
+              (apiErr.code === "23505" ||
+                /idx_templates_user_shortcut/i.test(String(apiErr.message || "")));
+
+            if (!isDuplicateShortcut || !window.MinutarioAPI.getTemplateByShortcut) {
+              throw apiErr;
+            }
+
+            var remoteTemplate = await window.MinutarioAPI.getTemplateByShortcut(userId, shortcut);
+            if (!remoteTemplate || !remoteTemplate.id) {
+              throw apiErr;
+            }
+
+            // Replace temporary local id with the canonical remote id and update remote content.
+            if (window.MinutarioDB && window.MinutarioDB.deleteTemplate) {
+              await window.MinutarioDB.deleteTemplate(tpl.id);
+            }
+
+            tpl.id = remoteTemplate.id;
+            tpl.created_at = remoteTemplate.created_at || tpl.created_at;
+            tpl.createdAt = remoteTemplate.createdAt || tpl.createdAt;
+
+            if (window.MinutarioDB && window.MinutarioDB.saveTemplate) {
+              await window.MinutarioDB.saveTemplate(tpl);
+            } else if (window.MinutarioDB && window.MinutarioDB.putTemplate) {
+              await window.MinutarioDB.putTemplate(tpl);
+            }
+
+            currentTemplateId = tpl.id;
+            await window.MinutarioAPI.updateTemplate(tpl.id, tpl);
+          }
         }
       }
 

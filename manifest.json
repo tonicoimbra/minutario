@@ -4,6 +4,11 @@
   "version": "1.1.0",
   "description": "Expanda atalhos de texto em modelos HTML ricos em qualquer página do navegador.",
   "author": "Elvertoni Coimbra",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "minutario@elvertoni.coimbra"
+    }
+  },
   "permissions": ["storage", "clipboardWrite", "clipboardRead", "alarms", "tabs", "debugger"],
   "host_permissions": [
     "<all_urls>",

@@ -71,6 +71,84 @@
     return Object.values(merged);
   }
 
+  function toMillis(value) {
+    return new Date(value || 0).getTime();
+  }
+
+  function normalizeShortcut(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function isDuplicateShortcutError(err) {
+    if (!err) return false;
+    if (err.code === "23505") return true;
+    var msg = String(err.message || "");
+    return /idx_templates_user_shortcut/i.test(msg);
+  }
+
+  async function saveTemplateLocally(template) {
+    if (DB.saveTemplate) {
+      await DB.saveTemplate(template);
+    } else {
+      await DB.putTemplate(template);
+    }
+  }
+
+  async function pushLocalTemplates(userId, localTemplates, remoteTemplates) {
+    if (!API || !API.createTemplate || !API.updateTemplate) {
+      return;
+    }
+
+    var remoteById = {};
+    var remoteByShortcut = {};
+
+    (remoteTemplates || []).forEach(function (remote) {
+      remoteById[remote.id] = remote;
+      var key = normalizeShortcut(remote.shortcut);
+      if (key) remoteByShortcut[key] = remote;
+    });
+
+    for (var i = 0; i < (localTemplates || []).length; i++) {
+      var local = localTemplates[i];
+      var shortcutKey = normalizeShortcut(local.shortcut);
+
+      if (!shortcutKey) {
+        continue;
+      }
+
+      var payload = Object.assign({}, local, { user_id: userId });
+      var remoteMatch = remoteById[payload.id] || remoteByShortcut[shortcutKey] || null;
+
+      if (!remoteMatch) {
+        try {
+          await API.createTemplate(payload);
+          continue;
+        } catch (err) {
+          if (!isDuplicateShortcutError(err) || !API.getTemplateByShortcut) {
+            throw err;
+          }
+
+          remoteMatch = await API.getTemplateByShortcut(userId, payload.shortcut);
+          if (!remoteMatch) {
+            throw err;
+          }
+        }
+      }
+
+      if (payload.id !== remoteMatch.id && DB.deleteTemplate) {
+        await DB.deleteTemplate(payload.id);
+      }
+
+      payload.id = remoteMatch.id;
+
+      if (toMillis(payload.updated_at || payload.updatedAt) >= toMillis(remoteMatch.updated_at || remoteMatch.updatedAt)) {
+        await API.updateTemplate(remoteMatch.id, payload);
+      }
+
+      await saveTemplateLocally(payload);
+    }
+  }
+
   async function syncTemplates(userId) {
     if (!DB || !API) {
       setState("error");
@@ -81,10 +159,17 @@
 
     try {
       var lastSync = await DB.getMeta(CONFIG.LAST_SYNC_KEY);
-      var remoteTemplates = await API.getTemplates(userId, { since: lastSync });
-      var remoteFolders = await API.getFolders(userId);
       var localTemplates = await DB.getAllTemplates();
       var localFolders = DB.getAllFolders ? await DB.getAllFolders() : [];
+      var remoteTemplatesFull = await API.getTemplates(userId);
+
+      await pushLocalTemplates(userId, localTemplates, remoteTemplatesFull);
+
+      localTemplates = await DB.getAllTemplates();
+      localFolders = DB.getAllFolders ? await DB.getAllFolders() : [];
+
+      var remoteTemplates = await API.getTemplates(userId, { since: lastSync });
+      var remoteFolders = await API.getFolders(userId);
 
       var merged = mergeTemplates(localTemplates, remoteTemplates);
       var mergedFolders = mergeFolders(localFolders, remoteFolders);

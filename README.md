@@ -150,11 +150,63 @@ Sincronização bidirecional em tempo real:
 ### Usar
 
 1. No Dashboard, clique em **🔄 Sync Supabase**
-2. Na primeira vez, insira seu **email** e **senha** do Supabase Auth
+2. Na primeira vez, insira seu **email** e **senha** fornecidos pelo administrador
 3. Clique em **Entrar**
 4. A sincronização bidirecional ocorre automaticamente
 
-**Dica:** Você pode criar usuários diretamente no painel do Supabase (Authentication → Users → Add user) ou usar a API.
+**Importante:** O cadastro público no popup está desativado para simplificar a experiência do usuário final. Crie usuários no Supabase em **Authentication → Users → Add user**.
+
+---
+
+## Distribuição Piloto (manual)
+
+### 1. Geração de pacotes
+
+```bash
+npm install
+npm run release:pilot
+```
+
+Release com bump automático de versão:
+
+```bash
+npm run release:pilot:full:patch   # 1.1.0 -> 1.1.1
+npm run release:pilot:full:minor   # 1.1.0 -> 1.2.0
+```
+
+Artefatos gerados:
+- `dist/chrome/minutario-chrome-vX.Y.Z.zip`
+- `dist/firefox/*.zip` (build local para validação)
+
+### 2. Chrome (usuário final)
+
+1. Abra `chrome://extensions`
+2. Ative **Modo do desenvolvedor**
+3. Clique em **Carregar sem compactação**
+4. Selecione a pasta da extensão
+
+### 3. Firefox (usuário final)
+
+Para Firefox estável, distribua **somente .xpi assinado**.
+
+1. Defina variáveis de ambiente no PowerShell:
+   ```powershell
+   $env:AMO_JWT_ISSUER="seu_issuer"
+   $env:AMO_JWT_SECRET="seu_secret"
+   ```
+2. Gere o pacote assinado:
+   ```bash
+   npm run sign:firefox
+   ```
+3. Entregue o `.xpi` gerado em `dist/firefox/` aos usuários.
+
+### 4. Chaves Supabase
+
+- Use na extensão apenas:
+  - `SUPABASE_URL`
+  - `SUPABASE_ANON_KEY` (chave pública/publishable)
+- Nunca embuta `service_role`/secret na extensão.
+- Segurança de dados deve ficar em `Auth + RLS` (políticas por `auth.uid()`).
 
 ---
 

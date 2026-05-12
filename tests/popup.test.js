@@ -22,8 +22,8 @@ async function bootstrapPopup(options) {
   });
   const { window } = dom;
   const localStorageArea = Object.assign({}, options.localStorageArea || {});
-  const signUpCalls = [];
   const signInCalls = [];
+  const updateUserCalls = [];
   const clipboardWrites = [];
 
   window.chrome = {
@@ -46,6 +46,9 @@ async function bootstrapPopup(options) {
     runtime: {
       getURL(value) {
         return value;
+      },
+      getManifest() {
+        return { version: "9.9.9-test" };
       },
       async sendMessage() {
         return { ok: true, data: [] };
@@ -75,13 +78,13 @@ async function bootstrapPopup(options) {
           async getUser() {
             return { data: { user: null }, error: null };
           },
-          async signUp() {
-            signUpCalls.push(true);
-            return options.signUpResult;
-          },
           async signInWithPassword(creds) {
             signInCalls.push(creds);
             return options.signInResult;
+          },
+          async updateUser(payload) {
+            updateUserCalls.push(payload);
+            return options.updateUserResult || { data: { user: { id: "user-1" } }, error: null };
           },
           async signOut() {
             return {};
@@ -94,15 +97,11 @@ async function bootstrapPopup(options) {
   window.eval(popupSource);
   await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-  return { window, signUpCalls, signInCalls, clipboardWrites };
+  return { window, signInCalls, updateUserCalls, clipboardWrites };
 }
 
-test("popup signup falls back to login when user is already registered", async () => {
-  const { window, signUpCalls, signInCalls } = await bootstrapPopup({
-    signUpResult: {
-      data: { session: null, user: null },
-      error: { message: "User already registered" },
-    },
+test("popup performs login-only flow and opens dashboard", async () => {
+  const { window, signInCalls } = await bootstrapPopup({
     signInResult: {
       data: {
         session: {
@@ -119,18 +118,16 @@ test("popup signup falls back to login when user is already registered", async (
   });
 
   const form = window.document.getElementById("login-form");
-  window.document.getElementById("toggle-auth-mode").click();
   window.document.getElementById("login-email").value = "teste@example.com";
   window.document.getElementById("login-password").value = "12345678";
-  window.document.getElementById("login-password-confirm").value = "12345678";
 
   form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
   await new Promise((resolve) => window.setTimeout(resolve, 20));
 
-  assert.equal(signUpCalls.length, 1);
   assert.equal(signInCalls.length, 1);
   assert.equal(window.document.getElementById("dashboard-section").classList.contains("hidden"), false);
   assert.equal(window.document.getElementById("login-error").textContent, "");
+  assert.equal(window.document.getElementById("app-version").textContent, "v9.9.9-test");
 });
 
 test("popup copies the last saved Word diagnostic", async () => {
@@ -156,4 +153,36 @@ test("popup copies the last saved Word diagnostic", async () => {
   assert.match(clipboardWrites[0], /snapshot-500ms/);
   assert.match(clipboardWrites[0], /\/juris/);
   assert.equal(window.document.getElementById("word-probe-status").textContent, "Diagnóstico copiado.");
+});
+
+test("popup updates password for authenticated user", async () => {
+  const { window, updateUserCalls } = await bootstrapPopup({
+    signInResult: {
+      data: {
+        session: {
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+        },
+        user: {
+          id: "user-1",
+          email: "teste@example.com",
+        },
+      },
+      error: null,
+    },
+  });
+
+  window.showDashboard({ email: "teste@example.com" });
+  window.document.getElementById("toggle-password-form").click();
+  window.document.getElementById("new-password").value = "novaSenha123";
+  window.document.getElementById("confirm-password").value = "novaSenha123";
+  window.document
+    .getElementById("password-form")
+    .dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(updateUserCalls.length, 1);
+  assert.equal(updateUserCalls[0].password, "novaSenha123");
+  assert.equal(window.document.getElementById("account-status").textContent, "Senha atualizada com sucesso.");
 });

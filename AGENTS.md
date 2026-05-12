@@ -6,6 +6,9 @@
 npm test                                  # all tests via node:test + jsdom
 node --test tests/content.test.js         # single test file
 node --check background.js content.js     # syntax check (no tests)
+npm run pack:chrome                       # build Chrome zip in dist/chrome
+npm run sign:firefox                      # sign Firefox package (.xpi) via AMO API
+npm run release:pilot:full:patch          # bump patch + test/check + pack Chrome/Firefox
 ```
 
 ## Loading in Chrome
