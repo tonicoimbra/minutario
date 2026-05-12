@@ -152,10 +152,9 @@ Para recuperação de senha, configure `PASSWORD_RESET_REDIRECT_URL` se quiser f
 
 ### Usar
 
-1. No Dashboard, clique em **🔄 Sync Supabase**
-2. Na primeira vez, insira seu **email** e **senha** fornecidos pelo administrador
-3. Clique em **Entrar**
-4. A sincronização bidirecional ocorre automaticamente
+1. Faça login com o **email** e **senha** fornecidos pelo administrador.
+2. A sincronização bidirecional ocorre automaticamente ao entrar, criar, editar ou excluir minutas e pastas.
+3. Se precisar conferir manualmente, use o botão **Sincronizar**.
 
 **Importante:** O cadastro público no popup está desativado para simplificar a experiência do usuário final. Crie usuários no Supabase em **Authentication → Users → Add user**.
 

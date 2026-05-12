@@ -151,24 +151,6 @@
         border-color: rgba(65, 90, 119, 0.42);
         transform: translateY(-1px);
       }
-      #copy-word-probe {
-        border: 1px dashed rgba(65, 90, 119, 0.42);
-        background: var(--slate-50);
-        color: var(--slate-700);
-        box-shadow: none;
-      }
-      #copy-word-probe:hover {
-        background: #ffffff;
-        border-color: var(--tjpr-navy-600);
-        transform: translateY(-1px);
-      }
-      .word-probe-status {
-        margin: -2px 2px 4px;
-        min-height: 16px;
-        color: var(--slate-500);
-        font-size: 11px;
-        line-height: 1.35;
-      }
       .password-form {
         margin: -4px 0 10px;
         display: flex;
@@ -241,9 +223,8 @@
       <div class="action-buttons">
         <button id="open-quick-access" type="button">Consulta Rápida</button>
         <button id="open-dashboard" type="button">Abrir Dashboard</button>
-        <button id="force-sync" type="button">Sync Agora</button>
+        <button id="force-sync" type="button">Sincronizar</button>
         <button id="toggle-password-form" type="button">Trocar Senha</button>
-        <button id="copy-word-probe" type="button">Copiar Diagnóstico Word</button>
         <button id="logout" type="button">Sair</button>
       </div>
       <form id="password-form" class="password-form hidden">
@@ -255,12 +236,6 @@
         </div>
       </form>
       <p id="account-status" class="account-status" aria-live="polite"></p>
-      <p id="word-probe-status" class="word-probe-status" aria-live="polite"></p>
-
-      <section class="recentes" aria-labelledby="recentes-label">
-        <h2 id="recentes-label">Recentes</h2>
-        <div id="recent-list"></div>
-      </section>
     </section>
 
     <footer>

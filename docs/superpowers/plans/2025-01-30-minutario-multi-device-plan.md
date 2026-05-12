@@ -1945,7 +1945,7 @@ git commit -m "feat(background): add periodic sync with Supabase and realtime no
     <div id="sync-status" class="status">Sincronizado</div>
     <div class="actions">
       <button id="open-dashboard">Abrir Dashboard</button>
-      <button id="force-sync">Sync Agora</button>
+      <button id="force-sync">Sincronizar</button>
       <button id="logout">Sair</button>
     </div>
   </div>

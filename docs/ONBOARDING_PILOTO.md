@@ -38,7 +38,7 @@ Garantir instalação e login sem sair da extensão, com o menor atrito possíve
 
 1. Login realizado sem erro.
 2. Dashboard abre normalmente.
-3. `Sync Agora` conclui sem erro.
+3. `Sincronizar` conclui sem erro.
 4. Um template criado aparece após reabrir popup.
 
 ## Atualização de versão no piloto manual

@@ -70,6 +70,8 @@ async function bootstrapPopup(options) {
   });
 
   window.MinutarioAPI = {
+    async saveAuthSession() {},
+    async clearAuthSession() {},
     getClient() {
       return {
         auth: {
@@ -105,7 +107,7 @@ async function bootstrapPopup(options) {
     async prepareUserContext() {
       return false;
     },
-    async fullSync() {
+    async syncTemplates() {
       return { success: true };
     },
   };
@@ -146,29 +148,13 @@ test("popup performs login-only flow and opens dashboard", async () => {
   assert.equal(window.document.getElementById("app-version").textContent, "v9.9.9-test");
 });
 
-test("popup copies the last saved Word diagnostic", async () => {
-  const savedProbe = {
-    phase: "snapshot-500ms",
-    diagnostics: {
-      expectedText: "/juris",
-      replacementText: "What is Lorem Ipsum?",
-    },
-  };
+test("popup hides Word diagnostic and recent-empty UI", async () => {
+  const { window } = await bootstrapPopup();
 
-  const { window, clipboardWrites } = await bootstrapPopup({
-    localStorageArea: {
-      minutario_last_word_probe: savedProbe,
-    },
-  });
-
-  window.showDashboard({ email: "teste@example.com" });
-  window.document.getElementById("copy-word-probe").click();
-  await new Promise((resolve) => window.setTimeout(resolve, 20));
-
-  assert.equal(clipboardWrites.length, 1);
-  assert.match(clipboardWrites[0], /snapshot-500ms/);
-  assert.match(clipboardWrites[0], /\/juris/);
-  assert.equal(window.document.getElementById("word-probe-status").textContent, "Diagnóstico copiado.");
+  assert.equal(window.document.getElementById("copy-word-probe"), null);
+  assert.equal(window.document.getElementById("word-probe-status"), null);
+  assert.equal(window.document.getElementById("recent-list"), null);
+  assert.equal(window.document.body.textContent.includes("Nenhum template usado ainda."), false);
 });
 
 test("popup updates password for authenticated user", async () => {

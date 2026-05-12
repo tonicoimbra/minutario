@@ -46,6 +46,9 @@ function bootstrapDashboard(html, options) {
   var remoteDeletedTemplateId = null;
   var syncUserId = null;
   var fullSyncUserId = null;
+  var autoSyncCalls = [];
+  var pendingTemplateDeleteId = null;
+  var pendingFolderDeleteId = null;
   var tabMessages = [];
   var savedTemplates = [];
   var downloadedFile = null;
@@ -218,18 +221,28 @@ function bootstrapDashboard(html, options) {
     },
     async deleteTemplate(id) {
       deletedTemplateId = id;
+      var idx = templates.findIndex((item) => item.id === id);
+      if (idx >= 0) templates.splice(idx, 1);
     },
     async getAllFolders() {
       return folders.slice();
     },
     async saveFolder(folder) {
       savedFolder = folder;
-      folders.push(folder);
+      var idx = folders.findIndex((item) => item.id === folder.id);
+      if (idx >= 0) {
+        folders[idx] = folder;
+      } else {
+        folders.push(folder);
+      }
     },
     async deleteFolder(id) {
       deletedFolderId = id;
+      var idx = folders.findIndex((item) => item.id === id);
+      if (idx >= 0) folders.splice(idx, 1);
     },
     async deleteAllTemplates() {},
+    async deleteAllFolders() {},
   };
   window.URL.createObjectURL = (blob) => {
     downloadedFile = { blob, url: "blob:csv" };
@@ -250,6 +263,17 @@ function bootstrapDashboard(html, options) {
     async syncTemplates(userId) {
       syncUserId = userId;
       return { success: true };
+    },
+    async flushAutoSync(userId, reason) {
+      syncUserId = userId;
+      autoSyncCalls.push({ userId, reason });
+      return { success: true };
+    },
+    async recordTemplateDelete(userId, id) {
+      pendingTemplateDeleteId = id;
+    },
+    async recordFolderDelete(userId, id) {
+      pendingFolderDeleteId = id;
     },
     async fullSync(userId) {
       fullSyncUserId = userId;
@@ -289,6 +313,9 @@ function bootstrapDashboard(html, options) {
       getSavedFolder: () => savedFolder,
       getDeletedFolderId: () => deletedFolderId,
       getRemoteDeletedTemplateId: () => remoteDeletedTemplateId,
+      getPendingTemplateDeleteId: () => pendingTemplateDeleteId,
+      getPendingFolderDeleteId: () => pendingFolderDeleteId,
+      getAutoSyncCalls: () => autoSyncCalls.slice(),
       getUserId: () => syncUserId,
       getFullSyncUserId: () => fullSyncUserId,
       getTabMessages: () => tabMessages.slice(),
@@ -368,7 +395,7 @@ test("CRUD dashboard keeps editor selection and saves through the IndexedDB API"
   assert.equal(getSavedTemplate().name, "Contrato atualizado");
 });
 
-test("dashboard restores the authenticated user id and syncs saved templates remotely", async () => {
+test("dashboard restores the authenticated user id and auto-syncs saved templates", async () => {
   const template = {
     id: "t1",
     name: "Contrato",
@@ -377,7 +404,7 @@ test("dashboard restores the authenticated user id and syncs saved templates rem
     folder_id: "folder-1",
     plain_text: "Texto inicial",
   };
-  const { window, getSavedTemplate, getUpdatedTemplate, getUserId } = await bootstrapDashboard(dashboardHtml, {
+  const { window, getSavedTemplate, getUserId, getAutoSyncCalls } = await bootstrapDashboard(dashboardHtml, {
     storedSession: true,
     templates: [template],
     apiUser: {
@@ -396,12 +423,14 @@ test("dashboard restores the authenticated user id and syncs saved templates rem
 
   assert.equal(getSavedTemplate().user_id, "user-app-id");
   assert.equal(getSavedTemplate().folder_id, "folder-1");
-  assert.equal(getUpdatedTemplate().id, "t1");
-  assert.equal(getUpdatedTemplate().template.user_id, "user-app-id");
   assert.equal(getUserId(), "user-app-id");
+  assert.deepEqual(getAutoSyncCalls().slice(-1)[0], {
+    userId: "user-app-id",
+    reason: "template:update",
+  });
 });
 
-test("dashboard creates remote templates and deletes them remotely", async () => {
+test("dashboard creates local templates and records deletes for automatic sync", async () => {
   const template = {
     id: "t1",
     name: "Contrato",
@@ -410,9 +439,10 @@ test("dashboard creates remote templates and deletes them remotely", async () =>
   };
   const {
     window,
-    getCreatedTemplate,
+    getSavedTemplate,
     getDeletedTemplateId,
-    getRemoteDeletedTemplateId,
+    getPendingTemplateDeleteId,
+    getAutoSyncCalls,
   } = await bootstrapDashboard(dashboardHtml, {
     storedSession: true,
     templates: [template],
@@ -427,7 +457,8 @@ test("dashboard creates remote templates and deletes them remotely", async () =>
 
   await new Promise((resolve) => window.setTimeout(resolve, 20));
 
-  assert.equal(getCreatedTemplate().id, "generated-id");
+  assert.equal(getSavedTemplate().id, "generated-id");
+  assert.equal(getAutoSyncCalls().slice(-1)[0].reason, "template:create");
 
   window.document.querySelector("#template-list .template-item").click();
   window.document.getElementById("delete-template").click();
@@ -435,7 +466,8 @@ test("dashboard creates remote templates and deletes them remotely", async () =>
   await new Promise((resolve) => window.setTimeout(resolve, 20));
 
   assert.equal(getDeletedTemplateId(), "t1");
-  assert.equal(getRemoteDeletedTemplateId(), "t1");
+  assert.equal(getPendingTemplateDeleteId(), "t1");
+  assert.equal(getAutoSyncCalls().slice(-1)[0].reason, "template:delete");
 });
 
 test("dashboard blocks duplicate shortcuts before saving", async () => {
@@ -459,8 +491,8 @@ test("dashboard blocks duplicate shortcuts before saving", async () => {
   assert.match(window.document.getElementById("shortcut-error").textContent, /Atalho já em uso/);
 });
 
-test("dashboard creates folders and exposes them in the selector", async () => {
-  const { window, getSavedFolder } = await bootstrapDashboard(dashboardHtml, {
+test("dashboard creates folders, exposes them in the selector and auto-syncs", async () => {
+  const { window, getSavedFolder, getAutoSyncCalls } = await bootstrapDashboard(dashboardHtml, {
     storedSession: true,
     folders: [],
   });
@@ -473,6 +505,29 @@ test("dashboard creates folders and exposes them in the selector", async () => {
   assert.equal(getSavedFolder().name, "Processos");
   assert.equal(window.document.querySelectorAll("#folder-list .folder-item").length, 1);
   assert.equal(window.document.querySelector('#tpl-folder option[value="' + getSavedFolder().id + '"]').textContent, "Processos");
+  assert.equal(getAutoSyncCalls().slice(-1)[0].reason, "folder:create");
+});
+
+test("dashboard renames and deletes folders through automatic sync", async () => {
+  const { window, getSavedFolder, getDeletedFolderId, getPendingFolderDeleteId, getAutoSyncCalls } = await bootstrapDashboard(dashboardHtml, {
+    storedSession: true,
+    folders: [{ id: "folder-1", user_id: "user-1", name: "Antiga", order_idx: 0 }],
+  });
+
+  window.document.querySelector("#folder-list .folder-item").click();
+  window.prompt = () => "Nova";
+  window.document.getElementById("rename-folder").click();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(getSavedFolder().name, "Nova");
+  assert.equal(getAutoSyncCalls().slice(-1)[0].reason, "folder:update");
+
+  window.document.getElementById("delete-folder").click();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+  assert.equal(getDeletedFolderId(), "folder-1");
+  assert.equal(getPendingFolderDeleteId(), "folder-1");
+  assert.equal(getAutoSyncCalls().slice(-1)[0].reason, "folder:delete");
 });
 
 test("dashboard notifies open tabs after saving a template", async () => {

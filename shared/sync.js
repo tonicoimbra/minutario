@@ -6,6 +6,16 @@
   var syncState = "idle";
   var listeners = [];
   var CURRENT_USER_META_KEY = "minutario_current_user_id";
+  var PENDING_TEMPLATE_DELETES_PREFIX = "minutario_pending_template_deletes";
+  var PENDING_FOLDER_DELETES_PREFIX = "minutario_pending_folder_deletes";
+  var AUTO_SYNC_DEBOUNCE_MS = 800;
+  var AUTO_SYNC_RETRY_MS = 5000;
+  var AUTO_SYNC_MAX_RETRIES = 3;
+  var autoSyncTimer = null;
+  var autoSyncUserId = null;
+  var autoSyncReason = null;
+  var autoSyncInFlight = false;
+  var autoSyncRetryCount = 0;
 
   function debugLog(message, details) {
     if (!CONFIG.DEBUG_LOGS || !global.console || typeof global.console.log !== "function") {
@@ -22,6 +32,11 @@
 
   function getLastSyncKey(userId) {
     return String(CONFIG.LAST_SYNC_KEY || "minutario_last_sync") + ":" + String(userId || "anonymous");
+  }
+
+  function getPendingDeleteKey(type, userId) {
+    var prefix = type === "folder" ? PENDING_FOLDER_DELETES_PREFIX : PENDING_TEMPLATE_DELETES_PREFIX;
+    return prefix + ":" + String(userId || "anonymous");
   }
 
   function setState(newState) {
@@ -106,6 +121,37 @@
     if (DB.deleteAllFolders) {
       await DB.deleteAllFolders();
     }
+  }
+
+  async function readPendingDeletes(type, userId) {
+    var value = await DB.getMeta(getPendingDeleteKey(type, userId));
+    return Array.isArray(value) ? value.filter(Boolean) : [];
+  }
+
+  async function writePendingDeletes(type, userId, ids) {
+    var unique = [];
+    (ids || []).forEach(function (id) {
+      if (id && unique.indexOf(id) === -1) unique.push(id);
+    });
+    await DB.setMeta(getPendingDeleteKey(type, userId), unique);
+  }
+
+  async function recordPendingDelete(type, userId, id) {
+    if (!userId || !id) return;
+    var ids = await readPendingDeletes(type, userId);
+    if (ids.indexOf(id) === -1) {
+      ids.push(id);
+      await writePendingDeletes(type, userId, ids);
+    }
+    debugLog("Recorded pending delete.", { type: type, userId: userId, id: id });
+  }
+
+  async function recordTemplateDelete(userId, id) {
+    await recordPendingDelete("template", userId, id);
+  }
+
+  async function recordFolderDelete(userId, id) {
+    await recordPendingDelete("folder", userId, id);
   }
 
   async function prepareUserContext(userId, previousUserId) {
@@ -209,6 +255,72 @@
     }
   }
 
+  async function pushLocalFolders(userId, localFolders, remoteFolders) {
+    if (!API || !API.createFolder || !API.updateFolder) {
+      return;
+    }
+
+    var remoteById = {};
+    (remoteFolders || []).forEach(function (remote) {
+      remoteById[remote.id] = remote;
+    });
+
+    for (var i = 0; i < (localFolders || []).length; i++) {
+      var local = localFolders[i];
+      if (!local || !local.id) continue;
+
+      var payload = Object.assign({}, local, { user_id: userId });
+      var remoteMatch = remoteById[payload.id] || null;
+
+      if (!remoteMatch) {
+        await API.createFolder(payload);
+        continue;
+      }
+
+      if (toMillis(payload.updated_at || payload.updatedAt) >= toMillis(remoteMatch.updated_at || remoteMatch.updatedAt)) {
+        await API.updateFolder(remoteMatch.id, payload);
+      }
+    }
+  }
+
+  async function pushPendingDeletes(userId) {
+    if (!API) return;
+
+    var templateDeletes = await readPendingDeletes("template", userId);
+    var remainingTemplateDeletes = [];
+
+    for (var i = 0; i < templateDeletes.length; i++) {
+      try {
+        if (API.deleteTemplate) {
+          await API.deleteTemplate(templateDeletes[i], userId);
+        }
+      } catch (err) {
+        remainingTemplateDeletes.push(templateDeletes[i]);
+      }
+    }
+
+    await writePendingDeletes("template", userId, remainingTemplateDeletes);
+
+    var folderDeletes = await readPendingDeletes("folder", userId);
+    var remainingFolderDeletes = [];
+
+    for (var j = 0; j < folderDeletes.length; j++) {
+      try {
+        if (API.deleteFolder) {
+          await API.deleteFolder(folderDeletes[j], userId);
+        }
+      } catch (folderErr) {
+        remainingFolderDeletes.push(folderDeletes[j]);
+      }
+    }
+
+    await writePendingDeletes("folder", userId, remainingFolderDeletes);
+
+    if (remainingTemplateDeletes.length || remainingFolderDeletes.length) {
+      throw new Error("Há exclusões pendentes que não foram sincronizadas.");
+    }
+  }
+
   async function syncTemplates(userId, options) {
     options = options || {};
 
@@ -232,15 +344,20 @@
       var localTemplates = filterTemplatesForUser(await DB.getAllTemplates(), userId);
       var localFolders = filterFoldersForUser(DB.getAllFolders ? await DB.getAllFolders() : [], userId);
       var remoteTemplatesFull = await API.getTemplates(userId);
+      var remoteFoldersFull = await API.getFolders(userId);
 
       debugLog("Starting incremental sync.", {
         userId: userId,
         lastSyncKey: lastSyncKey,
         lastSync: lastSync || null,
         localCount: localTemplates.length,
+        localFolderCount: localFolders.length,
         remoteCount: remoteTemplatesFull.length,
+        remoteFolderCount: remoteFoldersFull.length,
       });
 
+      await pushPendingDeletes(userId);
+      await pushLocalFolders(userId, localFolders, remoteFoldersFull);
       await pushLocalTemplates(userId, localTemplates, remoteTemplatesFull);
 
       localTemplates = filterTemplatesForUser(await DB.getAllTemplates(), userId);
@@ -276,6 +393,90 @@
       setState("offline");
       return { success: false, error: err.message };
     }
+  }
+
+  function scheduleAutoSyncRetry(userId, reason) {
+    if (autoSyncRetryCount >= AUTO_SYNC_MAX_RETRIES) {
+      debugLog("Auto sync retry limit reached.", {
+        userId: userId,
+        reason: reason,
+        retries: autoSyncRetryCount,
+      });
+      return;
+    }
+
+    autoSyncRetryCount += 1;
+    debugLog("Scheduling auto sync retry.", {
+      userId: userId,
+      reason: reason,
+      retry: autoSyncRetryCount,
+    });
+
+    if (autoSyncTimer) {
+      global.clearTimeout(autoSyncTimer);
+    }
+
+    autoSyncTimer = global.setTimeout(function () {
+      void runAutoSync();
+    }, AUTO_SYNC_RETRY_MS);
+  }
+
+  async function runAutoSync() {
+    if (autoSyncInFlight) {
+      return { success: false, error: "Sincronização já em andamento" };
+    }
+
+    var targetUserId = autoSyncUserId;
+    var reason = autoSyncReason;
+    autoSyncTimer = null;
+
+    if (!targetUserId) {
+      return { success: false, error: "Usuário não definido para sync automático" };
+    }
+
+    autoSyncInFlight = true;
+    debugLog("Running auto sync.", { userId: targetUserId, reason: reason || "unknown" });
+
+    try {
+      var result = await syncTemplates(targetUserId);
+      if (result && result.success) {
+        autoSyncRetryCount = 0;
+        return result;
+      }
+
+      scheduleAutoSyncRetry(targetUserId, reason);
+      return result || { success: false, error: "Erro ao sincronizar" };
+    } finally {
+      autoSyncInFlight = false;
+    }
+  }
+
+  function enqueueAutoSync(userId, reason, options) {
+    options = options || {};
+    if (!userId) {
+      return Promise.resolve({ success: false, error: "Usuário não definido para sync automático" });
+    }
+
+    autoSyncUserId = userId;
+    autoSyncReason = reason || autoSyncReason || "mutation";
+
+    if (autoSyncTimer) {
+      global.clearTimeout(autoSyncTimer);
+    }
+
+    return new Promise(function (resolve) {
+      var delay = options.immediate ? 0 : AUTO_SYNC_DEBOUNCE_MS;
+      autoSyncTimer = global.setTimeout(function () {
+        runAutoSync().then(resolve).catch(function (err) {
+          scheduleAutoSyncRetry(userId, reason);
+          resolve({ success: false, error: err && err.message ? err.message : String(err) });
+        });
+      }, delay);
+    });
+  }
+
+  function flushAutoSync(userId, reason) {
+    return enqueueAutoSync(userId, reason, { immediate: true });
   }
 
   async function fullSync(userId, options) {
@@ -337,6 +538,10 @@
     onSyncStateChange: onSyncStateChange,
     getSyncState: getSyncState,
     prepareUserContext: prepareUserContext,
+    enqueueAutoSync: enqueueAutoSync,
+    flushAutoSync: flushAutoSync,
+    recordTemplateDelete: recordTemplateDelete,
+    recordFolderDelete: recordFolderDelete,
     getLastSyncKey: getLastSyncKey,
     mergeTemplates: mergeTemplates,
     mergeFolders: mergeFolders,

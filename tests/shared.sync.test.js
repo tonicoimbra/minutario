@@ -48,6 +48,10 @@ function bootstrap() {
     _folders: [],
     _created: [],
     _updated: [],
+    _deletedTemplates: [],
+    _createdFolders: [],
+    _updatedFolders: [],
+    _deletedFolders: [],
     _getTemplateCalls: [],
     getTemplates: async function (orgId, options) {
       options = options || {};
@@ -80,6 +84,28 @@ function bootstrap() {
         return t.id === id ? Object.assign({}, t, updates) : t;
       });
       return updates;
+    },
+    deleteTemplate: async function (id) {
+      this._deletedTemplates.push(id);
+      this._templates = this._templates.filter(function (t) { return t.id !== id; });
+      return true;
+    },
+    createFolder: async function (folder) {
+      this._createdFolders.push(folder);
+      this._folders.push(folder);
+      return folder;
+    },
+    updateFolder: async function (id, updates) {
+      this._updatedFolders.push({ id: id, updates: updates });
+      this._folders = this._folders.map(function (folder) {
+        return folder.id === id ? Object.assign({}, folder, updates) : folder;
+      });
+      return updates;
+    },
+    deleteFolder: async function (id) {
+      this._deletedFolders.push(id);
+      this._folders = this._folders.filter(function (folder) { return folder.id !== id; });
+      return true;
     },
   };
 
@@ -245,4 +271,39 @@ test("syncTemplates full syncs and clears local data when user changes", async (
   assert.equal(global.MinutarioDB._folders[0].id, "folder-b");
   assert.equal(await global.MinutarioDB.getMeta("minutario_current_user_id"), "user-b");
   assert.ok(await global.MinutarioDB.getMeta("minutario_last_sync:user-b"));
+});
+
+test("syncTemplates pushes pending template and folder deletes", async () => {
+  var Sync = bootstrap();
+  await Sync.recordTemplateDelete("org1", "template-delete-1");
+  await Sync.recordFolderDelete("org1", "folder-delete-1");
+
+  var result = await Sync.syncTemplates("org1");
+
+  assert.equal(result.success, true);
+  assert.deepEqual(global.MinutarioAPI._deletedTemplates, ["template-delete-1"]);
+  assert.deepEqual(global.MinutarioAPI._deletedFolders, ["folder-delete-1"]);
+  assert.deepEqual(await global.MinutarioDB.getMeta("minutario_pending_template_deletes:org1"), []);
+  assert.deepEqual(await global.MinutarioDB.getMeta("minutario_pending_folder_deletes:org1"), []);
+});
+
+test("flushAutoSync runs automatic sync immediately", async () => {
+  var Sync = bootstrap();
+  global.MinutarioDB._templates = [
+    {
+      id: "local-auto",
+      user_id: "org1",
+      name: "Auto",
+      shortcut: "auto",
+      content: "<p>auto</p>",
+      plain_text: "auto",
+      updated_at: "2024-06-02T00:00:00Z",
+    },
+  ];
+
+  var result = await Sync.flushAutoSync("org1", "template:create");
+
+  assert.equal(result.success, true);
+  assert.equal(global.MinutarioAPI._created.length, 1);
+  assert.equal(global.MinutarioAPI._created[0].id, "local-auto");
 });

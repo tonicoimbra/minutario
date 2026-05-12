@@ -112,19 +112,18 @@ async function bootstrapQuickAccess() {
   return { window, sentMessages, clipboardWrites };
 }
 
-test("quick access opens with recent templates selected", async () => {
+test("quick access opens with all templates selected", async () => {
   const { window } = await bootstrapQuickAccess();
   const rows = window.document.querySelectorAll(".result-item");
 
-  assert.equal(rows.length, 1);
-  assert.match(rows[0].textContent, /Despacho Inicial/);
-  assert.match(window.document.getElementById("preview-content").innerHTML, /Despacho/);
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].textContent, /Despacho Inicial|Recurso Especial/);
+  assert.equal(window.document.getElementById("tab-recent"), null);
 });
 
 test("quick access filters by search and folder chips", async () => {
   const { window } = await bootstrapQuickAccess();
 
-  window.document.getElementById("tab-all").click();
   window.document.getElementById("template-search").value = "/recurso";
   window.document
     .getElementById("template-search")

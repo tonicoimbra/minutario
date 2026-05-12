@@ -24,35 +24,37 @@ function bootstrapApi() {
   window.supabase = {
     createClient() {
       return {
+        auth: {
+          async getSession() {
+            return { data: { session: { access_token: "token" } }, error: null };
+          },
+          async getUser() {
+            return { data: { user: { id: "user-1" } }, error: null };
+          },
+        },
         from() {
-          return {
-            insert(payload) {
-              calls.push({ type: "insert", payload });
+          const query = {
+            eq() {
+              return query;
+            },
+            select() {
               return {
-                select() {
-                  return {
-                    single: async function () {
-                      return { data: payload, error: null };
-                    },
-                  };
+                single: async function () {
+                  return { data: query.payload, error: null };
                 },
               };
             },
+          };
+          return {
+            insert(payload) {
+              calls.push({ type: "insert", payload });
+              query.payload = payload;
+              return query;
+            },
             update(payload) {
               calls.push({ type: "update", payload });
-              return {
-                eq() {
-                  return {
-                    select() {
-                      return {
-                        single: async function () {
-                          return { data: payload, error: null };
-                        },
-                      };
-                    },
-                  };
-                },
-              };
+              query.payload = payload;
+              return query;
             },
           };
         },
@@ -61,8 +63,18 @@ function bootstrapApi() {
   };
 
   window.eval(configSource);
+  window.MinutarioConfig.DEBUG_LOGS = false;
   window.eval(apiSource);
   return { window, calls };
+}
+
+function bootstrapApiWithAuthUser(authUserId) {
+  const setup = bootstrapApi();
+  const client = setup.window.MinutarioAPI.getClient();
+  client.auth.getUser = async function () {
+    return { data: { user: { id: authUserId } }, error: null };
+  };
+  return setup;
 }
 
 test("MinutarioAPI.createTemplate strips non-schema fields before insert", async () => {
@@ -132,4 +144,34 @@ test("MinutarioAPI.updateTemplate strips non-schema fields before update", async
       updated_at: "2026-05-05T12:10:00.000Z",
     },
   });
+});
+
+test("MinutarioAPI.createTemplate binds missing user_id to authenticated user", async () => {
+  const { window, calls } = bootstrapApiWithAuthUser("auth-user-1");
+
+  await window.MinutarioAPI.createTemplate({
+    id: "tpl-1",
+    name: "Contrato",
+    shortcut: "contrato",
+    content: "<p>Texto</p>",
+    plain_text: "Texto",
+  });
+
+  assert.equal(calls[0].payload.user_id, "auth-user-1");
+});
+
+test("MinutarioAPI.createTemplate rejects mismatched authenticated user", async () => {
+  const { window } = bootstrapApiWithAuthUser("auth-user-1");
+
+  await assert.rejects(
+    () => window.MinutarioAPI.createTemplate({
+      id: "tpl-1",
+      user_id: "other-user",
+      name: "Contrato",
+      shortcut: "contrato",
+      content: "<p>Texto</p>",
+      plain_text: "Texto",
+    }),
+    /Sessão Supabase pertence a outro usuário/
+  );
 });

@@ -4,12 +4,11 @@
   var state = {
     templates: [],
     folders: [],
-    recentIds: [],
-    mode: "recent",
+    mode: "all",
     folderId: null,
     query: "",
     selectedTemplateId: null,
-    syncLabel: "Cache local",
+    syncLabel: "Local",
   };
 
   var els = {};
@@ -25,8 +24,6 @@
     els.folderChipList = document.getElementById("folder-chip-list");
     els.resultCount = document.getElementById("result-count");
     els.syncStatus = document.getElementById("sync-status");
-    els.tabRecent = document.getElementById("tab-recent");
-    els.tabAll = document.getElementById("tab-all");
     els.toast = document.getElementById("toast");
   }
 
@@ -86,10 +83,6 @@
         return false;
       }
 
-      if (state.mode === "recent" && state.recentIds.indexOf(template.id) === -1) {
-        return false;
-      }
-
       if (!query) {
         return true;
       }
@@ -98,10 +91,6 @@
     });
 
     filtered.sort(function (a, b) {
-      if (state.mode === "recent" && !query) {
-        return state.recentIds.indexOf(a.id) - state.recentIds.indexOf(b.id);
-      }
-
       var scoreDiff = scoreMatch(b, query) - scoreMatch(a, query);
       if (scoreDiff !== 0) {
         return scoreDiff;
@@ -111,16 +100,6 @@
     });
 
     return filtered;
-  }
-
-  function setMode(mode) {
-    state.mode = mode;
-    if (els.tabRecent) els.tabRecent.classList.toggle("active", mode === "recent");
-    if (els.tabAll) els.tabAll.classList.toggle("active", mode === "all");
-    if (els.tabRecent) els.tabRecent.setAttribute("aria-selected", mode === "recent" ? "true" : "false");
-    if (els.tabAll) els.tabAll.setAttribute("aria-selected", mode === "all" ? "true" : "false");
-    ensureSelectedTemplate();
-    render();
   }
 
   function setFolderFilter(folderId) {
@@ -289,14 +268,6 @@
     return response.data;
   }
 
-  async function requestRecentIds() {
-    var response = await chrome.runtime.sendMessage({ type: "GET_RECENT" });
-    if (!response || !response.ok || !Array.isArray(response.data)) {
-      return [];
-    }
-    return response.data;
-  }
-
   function showToast(message, tone) {
     if (!els.toast) return;
 
@@ -407,12 +378,10 @@
     var results = await Promise.all([
       requestTemplates(),
       requestFolders(),
-      requestRecentIds(),
     ]);
 
     state.templates = results[0];
     state.folders = results[1];
-    state.recentIds = results[2];
     ensureSelectedTemplate();
     render();
   }
@@ -480,17 +449,6 @@
       els.openDashboardButton.addEventListener("click", openDashboard);
     }
 
-    if (els.tabRecent) {
-      els.tabRecent.addEventListener("click", function () {
-        setMode("recent");
-      });
-    }
-
-    if (els.tabAll) {
-      els.tabAll.addEventListener("click", function () {
-        setMode("all");
-      });
-    }
   }
 
   async function init() {

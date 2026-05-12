@@ -3,7 +3,6 @@ document.addEventListener("DOMContentLoaded", function () {
   var openQuickAccessBtn = document.getElementById("open-quick-access");
   var openDashboardBtn = document.getElementById("open-dashboard");
   var forceSyncBtn = document.getElementById("force-sync");
-  var copyWordProbeBtn = document.getElementById("copy-word-probe");
   var logoutBtn = document.getElementById("logout");
   var togglePasswordFormBtn = document.getElementById("toggle-password-form");
   var passwordForm = document.getElementById("password-form");
@@ -24,10 +23,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
   if (forceSyncBtn) {
     forceSyncBtn.addEventListener("click", forceSync);
-  }
-
-  if (copyWordProbeBtn) {
-    copyWordProbeBtn.addEventListener("click", copyWordProbe);
   }
 
   if (logoutBtn) {
@@ -86,14 +81,20 @@ function getStoredTokens() {
   };
 }
 
-function saveTokens(session) {
+async function saveTokens(session) {
   localStorage.setItem("minutario_access_token", session.access_token);
   localStorage.setItem("minutario_refresh_token", session.refresh_token);
+  if (window.MinutarioAPI && window.MinutarioAPI.saveAuthSession) {
+    await window.MinutarioAPI.saveAuthSession(session);
+  }
 }
 
-function clearTokens() {
+async function clearTokens() {
   localStorage.removeItem("minutario_access_token");
   localStorage.removeItem("minutario_refresh_token");
+  if (window.MinutarioAPI && window.MinutarioAPI.clearAuthSession) {
+    await window.MinutarioAPI.clearAuthSession();
+  }
 }
 
 function showLogin() {
@@ -109,17 +110,12 @@ function showDashboard(user) {
   var loginSection = document.getElementById("login-section");
   var dashboardSection = document.getElementById("dashboard-section");
   var userEmailEl = document.getElementById("user-email");
-  var recentList = document.getElementById("recent-list");
 
   if (loginSection) loginSection.classList.add("hidden");
   if (dashboardSection) dashboardSection.classList.remove("hidden");
 
   if (userEmailEl) {
     userEmailEl.textContent = user && user.email ? user.email : "Usuário";
-  }
-
-  if (recentList) {
-    loadRecentTemplates(recentList);
   }
 
   updateSyncStatus();
@@ -151,16 +147,6 @@ function togglePasswordForm() {
   }
 }
 
-function setWordProbeStatus(message, isError) {
-  var statusEl = document.getElementById("word-probe-status");
-  if (!statusEl) {
-    return;
-  }
-
-  statusEl.textContent = message || "";
-  statusEl.style.color = isError ? "#dc2626" : "";
-}
-
 async function checkAuth() {
   var tokens = getStoredTokens();
 
@@ -183,7 +169,7 @@ async function checkAuth() {
       console.error("Auth restore failed:", err);
     }
 
-    clearTokens();
+    await clearTokens();
   }
 
   showLogin();
@@ -215,7 +201,7 @@ async function handleLogin(event) {
       throw new Error("Sessão não retornada");
     }
 
-    saveTokens(session);
+    await saveTokens(session);
 
     var userId = user && user.id ? user.id : null;
     if (userId) {
@@ -228,8 +214,14 @@ async function handleLogin(event) {
 
       if (window.MinutarioSync && window.MinutarioSync.prepareUserContext) {
         var switched = await window.MinutarioSync.prepareUserContext(userId, previous);
-        if (switched && window.MinutarioSync.fullSync) {
-          await window.MinutarioSync.fullSync(userId, { skipUserContext: true });
+        if (window.MinutarioSync.syncTemplates) {
+          var syncResult = await window.MinutarioSync.syncTemplates(userId, {
+            forceFullPull: true,
+            skipUserContext: switched,
+          });
+          if (!syncResult || !syncResult.success) {
+            throw new Error(syncResult && syncResult.error ? syncResult.error : "Falha ao sincronizar após login");
+          }
         }
       }
 
@@ -312,7 +304,7 @@ async function handleLogout() {
     // ignore
   }
 
-  clearTokens();
+  await clearTokens();
   var extensionApi = getExtensionApi();
   if (extensionApi && extensionApi.storage && extensionApi.storage.local) {
     await extensionApi.storage.local.remove("minutario_user_id");
@@ -395,34 +387,6 @@ async function forceSync() {
     }
   } catch (err) {
     if (statusEl) statusEl.textContent = "Erro na sincronização";
-  }
-}
-
-async function copyWordProbe() {
-  try {
-    var extensionApi = getExtensionApi();
-    var stored = await extensionApi.storage.local.get("minutario_last_word_probe");
-    var probe = stored && stored.minutario_last_word_probe;
-
-    if (!probe) {
-      setWordProbeStatus("Nenhum diagnóstico do Word salvo ainda.", true);
-      return;
-    }
-
-    var serialized = JSON.stringify(probe, null, 2);
-
-    if (
-      navigator.clipboard &&
-      typeof navigator.clipboard.writeText === "function"
-    ) {
-      await navigator.clipboard.writeText(serialized);
-      setWordProbeStatus("Diagnóstico copiado.");
-      return;
-    }
-
-    setWordProbeStatus("Clipboard indisponível neste popup.", true);
-  } catch (error) {
-    setWordProbeStatus("Falha ao copiar diagnóstico.", true);
   }
 }
 
@@ -544,8 +508,4 @@ function stripHtml(html) {
 
 function renderEmptyState(container) {
   container.innerHTML = "";
-  var message = document.createElement("p");
-  message.className = "empty-state";
-  message.textContent = "Nenhum template usado ainda.";
-  container.appendChild(message);
 }

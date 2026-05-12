@@ -17,7 +17,6 @@
         <p class="developer-credit">Desenvolvido por Elvertoni Coimbra</p>
       </div>
     </div>
-    <button id="new-template" class="btn btn-primary" type="button">+ Novo Template</button>
   </header>
 
   <section class="import-bar">
@@ -29,7 +28,7 @@
       <span id="import-status" class="import-status"></span>
     </div>
     <button id="export-csv" class="btn btn-secondary" type="button">💾 Exportar CSV</button>
-    <button id="supabase-sync" class="btn btn-secondary" type="button">🔄 Sync Supabase</button>
+    <button id="supabase-sync" class="btn btn-secondary" type="button">Sincronizar</button>
   </section>
 
   <main class="dashboard-grid">
@@ -38,11 +37,13 @@
       <ul id="folder-list" class="folder-list"></ul>
       <div class="folder-actions">
         <button id="new-folder" class="btn btn-secondary" type="button">+ Nova Pasta</button>
+        <button id="rename-folder" class="btn btn-secondary" type="button" disabled>Renomear Pasta</button>
         <button id="delete-folder" class="btn btn-danger btn-folder-delete" type="button" disabled>Excluir Pasta</button>
       </div>
     </aside>
 
     <section class="panel panel-list">
+      <button id="new-template" class="btn btn-primary btn-new-template-list" type="button">+ Novo Template</button>
       <div class="search-wrap">
         <input id="search" type="search" placeholder="Buscar por nome ou atalho..." autocomplete="off">
       </div>
