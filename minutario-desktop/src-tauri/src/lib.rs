@@ -7,6 +7,7 @@ use hooks::keyboard;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use tauri::{
+    Emitter,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Manager, State, WindowEvent,
@@ -14,6 +15,22 @@ use tauri::{
 
 pub struct AppDb {
     conn: Arc<Mutex<rusqlite::Connection>>,
+}
+
+pub struct DeepLinkState {
+    pending_url: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct AuthSessionPayload {
+    access_token: String,
+    refresh_token: String,
+}
+
+fn extract_deep_link_from_args(args: &[String]) -> Option<String> {
+    args.iter()
+        .find(|arg| arg.starts_with("tauri://localhost/"))
+        .cloned()
 }
 
 #[tauri::command]
@@ -191,20 +208,117 @@ async fn supabase_password_login(
     Ok(parsed)
 }
 
+#[tauri::command]
+fn store_auth_session(service: String, access_token: String, refresh_token: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(
+        if service.trim().is_empty() {
+            "com.minutario.desktop.auth"
+        } else {
+            service.trim()
+        },
+        "supabase_session",
+    )
+    .map_err(|e| format!("Falha ao acessar keyring: {e}"))?;
+
+    let payload = AuthSessionPayload {
+        access_token,
+        refresh_token,
+    };
+    let serialized =
+        serde_json::to_string(&payload).map_err(|e| format!("Falha ao serializar sessão: {e}"))?;
+
+    entry
+        .set_password(&serialized)
+        .map_err(|e| format!("Falha ao gravar sessão segura: {e}"))
+}
+
+#[tauri::command]
+fn read_auth_session(service: String) -> Result<Option<AuthSessionPayload>, String> {
+    let entry = keyring::Entry::new(
+        if service.trim().is_empty() {
+            "com.minutario.desktop.auth"
+        } else {
+            service.trim()
+        },
+        "supabase_session",
+    )
+    .map_err(|e| format!("Falha ao acessar keyring: {e}"))?;
+
+    match entry.get_password() {
+        Ok(raw) => {
+            let parsed: AuthSessionPayload = serde_json::from_str(&raw)
+                .map_err(|e| format!("Sessão inválida no keyring: {e}"))?;
+            Ok(Some(parsed))
+        }
+        Err(err) => {
+            let msg = err.to_string().to_lowercase();
+            if msg.contains("no entry") || msg.contains("not found") {
+                Ok(None)
+            } else {
+                Err(format!("Falha ao ler sessão segura: {err}"))
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn clear_auth_session(service: String) -> Result<(), String> {
+    let entry = keyring::Entry::new(
+        if service.trim().is_empty() {
+            "com.minutario.desktop.auth"
+        } else {
+            service.trim()
+        },
+        "supabase_session",
+    )
+    .map_err(|e| format!("Falha ao acessar keyring: {e}"))?;
+
+    match entry.delete_credential() {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            let msg = err.to_string().to_lowercase();
+            if msg.contains("no entry") || msg.contains("not found") {
+                Ok(())
+            } else {
+                Err(format!("Falha ao limpar sessão segura: {err}"))
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn consume_pending_deep_link(state: State<DeepLinkState>) -> Option<String> {
+    state.pending_url.lock().ok().and_then(|mut guard| guard.take())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let initial_args: Vec<String> = std::env::args().collect();
+    let initial_deep_link = extract_deep_link_from_args(&initial_args);
+
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(url) = extract_deep_link_from_args(&argv) {
+                if let Some(state) = app.try_state::<DeepLinkState>() {
+                    if let Ok(mut pending) = state.pending_url.lock() {
+                        *pending = Some(url.clone());
+                    }
+                }
+                let _ = app.emit("minutario://deep-link", url);
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
             let conn = db::sqlite::init_db(app.handle()).expect("failed to init database");
             let conn = Arc::new(Mutex::new(conn));
             app.manage(AppDb { conn: conn.clone() });
+            app.manage(DeepLinkState {
+                pending_url: Arc::new(Mutex::new(initial_deep_link.clone())),
+            });
 
             let open_item = MenuItem::with_id(app, "open", "Abrir Minutário", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
@@ -280,6 +394,10 @@ pub fn run() {
             toggle_hook,
             get_hook_status,
             supabase_password_login,
+            store_auth_session,
+            read_auth_session,
+            clear_auth_session,
+            consume_pending_deep_link,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

@@ -11,6 +11,9 @@
   var allFolders = [];
   var activeFolderId = null;
   var quill = null;
+  var authUi = window.MinutarioAuthUI || {};
+  var resendConfirmationEmail = "";
+  var resendCooldown = null;
   var FONT_SIZE_VALUES = (window.MinutarioRichClipboard && window.MinutarioRichClipboard.FONT_SIZE_VALUES) || [
     "8pt",
     "9pt",
@@ -36,9 +39,48 @@
     els.loginScreen = document.getElementById("login-screen");
     els.dashboardScreen = document.getElementById("dashboard-screen");
     els.loginForm = document.getElementById("login-form");
-    els.loginEmail = document.getElementById("login-email");
+    els.loginView = document.getElementById("login-view");
+    els.signupView = document.getElementById("signup-view");
+    els.forgotView = document.getElementById("forgot-view");
+    els.resetView = document.getElementById("reset-view");
+    els.loginEmail = document.getElementById("login-email-id");
     els.loginPassword = document.getElementById("login-password");
-    els.loginError = document.getElementById("login-error");
+    els.loginEmailError = document.getElementById("login-email-error");
+    els.loginStatus = document.getElementById("login-status");
+    els.loginButton = document.getElementById("login-btn");
+    els.goSignup = document.getElementById("go-signup");
+    els.goForgot = document.getElementById("go-forgot");
+    els.backToLoginFromSignup = document.getElementById("back-to-login-from-signup");
+    els.backToLoginFromForgot = document.getElementById("back-to-login-from-forgot");
+    els.signupForm = document.getElementById("signup-form");
+    els.signupEmail = document.getElementById("signup-email-id");
+    els.signupEmailError = document.getElementById("signup-email-error");
+    els.signupPassword = document.getElementById("signup-password");
+    els.signupPasswordConfirm = document.getElementById("signup-password-confirm");
+    els.signupPasswordStrength = document.getElementById("signup-password-strength");
+    els.signupPasswordError = document.getElementById("signup-password-error");
+    els.signupConfirmError = document.getElementById("signup-confirm-error");
+    els.signupStatus = document.getElementById("signup-status");
+    els.signupSuccessBox = document.getElementById("signup-success-box");
+    els.signupLgpdAccept = document.getElementById("signup-lgpd-accept");
+    els.signupButton = document.getElementById("signup-btn");
+    els.forgotForm = document.getElementById("forgot-form");
+    els.forgotEmail = document.getElementById("forgot-email-id");
+    els.forgotEmailError = document.getElementById("forgot-email-error");
+    els.forgotStatus = document.getElementById("forgot-status");
+    els.forgotButton = document.getElementById("forgot-btn");
+    els.resetForm = document.getElementById("reset-form");
+    els.resetNewPassword = document.getElementById("reset-new-password");
+    els.resetConfirmPassword = document.getElementById("reset-confirm-password");
+    els.resetPasswordStrength = document.getElementById("reset-password-strength");
+    els.resetPasswordError = document.getElementById("reset-password-error");
+    els.resetConfirmError = document.getElementById("reset-confirm-error");
+    els.resetStatus = document.getElementById("reset-status");
+    els.resetButton = document.getElementById("reset-btn");
+    els.backToLoginFromReset = document.getElementById("back-to-login-from-reset");
+    els.resendWrap = document.getElementById("resend-confirmation-wrap");
+    els.resendButton = document.getElementById("resend-confirmation-btn");
+    els.resendCountdown = document.getElementById("resend-countdown");
     els.logoutBtn = document.getElementById("logout-btn");
     els.searchInput = document.getElementById("search-input") || document.getElementById("search");
     els.templateList = document.getElementById("template-list");
@@ -219,17 +261,223 @@
   }
 
   // Auth helpers
-  function getStoredTokens() {
-    return {
-      accessToken: localStorage.getItem("minutario_access_token"),
-      refreshToken: localStorage.getItem("minutario_refresh_token")
-    };
-  }
-
   function getTauriInvoke() {
     return window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke
       ? window.__TAURI__.core.invoke
       : null;
+  }
+
+  function setFieldError(el, message) {
+    if (authUi.setFieldError) {
+      authUi.setFieldError(el, message);
+      return;
+    }
+    if (el) {
+      el.textContent = message || "";
+    }
+  }
+
+  function setFormStatus(el, message, type) {
+    if (authUi.setStatus) {
+      authUi.setStatus(el, message, type || "");
+      return;
+    }
+    if (el) {
+      el.textContent = message || "";
+    }
+  }
+
+  function clearAuthMessages() {
+    setFieldError(els.loginEmailError, "");
+    setFieldError(els.signupEmailError, "");
+    setFieldError(els.signupPasswordError, "");
+    setFieldError(els.signupConfirmError, "");
+    setFieldError(els.forgotEmailError, "");
+    setFieldError(els.resetPasswordError, "");
+    setFieldError(els.resetConfirmError, "");
+    setFormStatus(els.loginStatus, "");
+    setFormStatus(els.signupStatus, "");
+    setFormStatus(els.forgotStatus, "");
+    setFormStatus(els.resetStatus, "");
+  }
+
+  function showAuthView(name) {
+    clearAuthMessages();
+    if (els.signupSuccessBox) {
+      els.signupSuccessBox.classList.add("hidden");
+      els.signupSuccessBox.textContent = "";
+    }
+    if (els.loginView) els.loginView.classList.add("hidden");
+    if (els.signupView) els.signupView.classList.add("hidden");
+    if (els.forgotView) els.forgotView.classList.add("hidden");
+    if (els.resetView) els.resetView.classList.add("hidden");
+
+    if (name === "signup" && els.signupView) {
+      els.signupView.classList.remove("hidden");
+    } else if (name === "forgot" && els.forgotView) {
+      els.forgotView.classList.remove("hidden");
+    } else if (name === "reset" && els.resetView) {
+      els.resetView.classList.remove("hidden");
+    } else if (els.loginView) {
+      els.loginView.classList.remove("hidden");
+    }
+  }
+
+  function setSubmitLoading(buttonEl, loading, label) {
+    var textEl;
+    var defaultLabel;
+    var spinnerEl;
+
+    if (!buttonEl) return;
+    textEl = buttonEl.querySelector(".btn-text");
+    defaultLabel = buttonEl.dataset.defaultLabel || (textEl ? textEl.textContent : buttonEl.textContent);
+    buttonEl.dataset.defaultLabel = defaultLabel;
+
+    if (loading) {
+      buttonEl.disabled = true;
+      if (textEl) {
+        textEl.textContent = label || "Processando...";
+      } else {
+        buttonEl.textContent = label || "Processando...";
+      }
+      spinnerEl = buttonEl.querySelector(".spinner");
+      if (!spinnerEl) {
+        spinnerEl = document.createElement("span");
+        spinnerEl.className = "spinner";
+        if (buttonEl.querySelector(".auth-submit-content")) {
+          buttonEl.querySelector(".auth-submit-content").appendChild(spinnerEl);
+        } else {
+          buttonEl.appendChild(spinnerEl);
+        }
+      }
+      return;
+    }
+
+    if (textEl) {
+      textEl.textContent = defaultLabel;
+    } else {
+      buttonEl.textContent = defaultLabel;
+    }
+
+    spinnerEl = buttonEl.querySelector(".spinner");
+    if (spinnerEl) spinnerEl.remove();
+
+    if (buttonEl !== els.signupButton || !els.signupLgpdAccept || els.signupLgpdAccept.checked) {
+      buttonEl.disabled = false;
+    }
+  }
+
+  function getConfirmationRedirectUrl() {
+    var config = window.MinutarioConfig || {};
+    if (config.EMAIL_CONFIRMATION_REDIRECT_URL) {
+      return config.EMAIL_CONFIRMATION_REDIRECT_URL;
+    }
+    return "tauri://localhost/confirmed";
+  }
+
+  function getPasswordResetRedirectUrl() {
+    var config = window.MinutarioConfig || {};
+    if (config.PASSWORD_RESET_DESKTOP_REDIRECT_URL) {
+      return config.PASSWORD_RESET_DESKTOP_REDIRECT_URL;
+    }
+    if (config.PASSWORD_RESET_REDIRECT_URL) {
+      return config.PASSWORD_RESET_REDIRECT_URL;
+    }
+    return "tauri://localhost/password-reset";
+  }
+
+  function showResendConfirmation() {
+    if (els.resendWrap) els.resendWrap.classList.remove("hidden");
+    if (els.resendButton) els.resendButton.disabled = false;
+    if (els.resendCountdown) els.resendCountdown.textContent = "";
+  }
+
+  function hideResendConfirmation() {
+    if (els.resendWrap) els.resendWrap.classList.add("hidden");
+    if (resendCooldown && resendCooldown.stop) {
+      resendCooldown.stop();
+    }
+    resendCooldown = null;
+  }
+
+  function startResendCooldown(seconds) {
+    if (resendCooldown && resendCooldown.stop) {
+      resendCooldown.stop();
+    }
+
+    if (!authUi.createCooldown) {
+      return;
+    }
+
+    resendCooldown = authUi.createCooldown(
+      seconds,
+      function (remaining) {
+        if (els.resendCountdown) {
+          els.resendCountdown.textContent = remaining > 0 ? "Aguarde " + remaining + "s para reenviar." : "";
+        }
+        if (els.resendButton) {
+          els.resendButton.disabled = remaining > 0;
+        }
+      },
+      function () {
+        if (els.resendCountdown) els.resendCountdown.textContent = "";
+        if (els.resendButton) els.resendButton.disabled = false;
+      }
+    );
+  }
+
+  function updateSignupPasswordFeedback() {
+    var validation;
+    if (!els.signupPassword) return null;
+    validation = authUi.validatePassword ? authUi.validatePassword(els.signupPassword.value) : null;
+    if (authUi.setPasswordStrength) {
+      authUi.setPasswordStrength(els.signupPasswordStrength, validation);
+    }
+    if (authUi.getPasswordHint) {
+      setFieldError(els.signupPasswordError, authUi.getPasswordHint(validation));
+    }
+    updateSignupConfirmFeedback();
+    return validation;
+  }
+
+  function updateSignupConfirmFeedback() {
+    if (!els.signupPassword || !els.signupPasswordConfirm) return;
+    if (!els.signupPasswordConfirm.value) {
+      setFieldError(els.signupConfirmError, "");
+      return;
+    }
+    if (els.signupPassword.value !== els.signupPasswordConfirm.value) {
+      setFieldError(els.signupConfirmError, "As senhas não coincidem.");
+      return;
+    }
+    setFieldError(els.signupConfirmError, "");
+  }
+
+  function updateResetPasswordFeedback() {
+    var validation;
+    if (!els.resetNewPassword) return null;
+    validation = authUi.validatePassword ? authUi.validatePassword(els.resetNewPassword.value) : null;
+    if (authUi.setPasswordStrength) {
+      authUi.setPasswordStrength(els.resetPasswordStrength, validation);
+    }
+    if (authUi.getPasswordHint) {
+      setFieldError(els.resetPasswordError, authUi.getPasswordHint(validation));
+    }
+    updateResetConfirmFeedback();
+    return validation;
+  }
+
+  function updateResetConfirmFeedback() {
+    if (!els.resetNewPassword || !els.resetConfirmPassword) return;
+    if (!els.resetConfirmPassword.value) {
+      setFieldError(els.resetConfirmError, "");
+      return;
+    }
+    if (els.resetNewPassword.value !== els.resetConfirmPassword.value) {
+      setFieldError(els.resetConfirmError, "As senhas não coincidem.");
+      return;
+    }
+    setFieldError(els.resetConfirmError, "");
   }
 
   async function signInWithSupabaseJs(email, password) {
@@ -306,16 +554,12 @@
   }
 
   async function saveTokens(session) {
-    localStorage.setItem("minutario_access_token", session.access_token);
-    localStorage.setItem("minutario_refresh_token", session.refresh_token);
     if (window.MinutarioAPI && window.MinutarioAPI.saveAuthSession) {
       await window.MinutarioAPI.saveAuthSession(session);
     }
   }
 
   async function clearTokens() {
-    localStorage.removeItem("minutario_access_token");
-    localStorage.removeItem("minutario_refresh_token");
     localStorage.removeItem("minutario_user_id");
     if (window.MinutarioAPI && window.MinutarioAPI.clearAuthSession) {
       await window.MinutarioAPI.clearAuthSession();
@@ -354,6 +598,8 @@ function getUserIdFromUser(user) {
     document.body.classList.remove("dashboard-mode");
     if (els.loginScreen) els.loginScreen.classList.remove("hidden");
     if (els.dashboardScreen) els.dashboardScreen.classList.add("hidden");
+    hideResendConfirmation();
+    showAuthView("login");
   }
 
   function showDashboardScreen() {
@@ -465,14 +711,37 @@ function getUserIdFromUser(user) {
   // Login
   async function handleLogin(event) {
     event.preventDefault();
-    var email = els.loginEmail.value.trim();
-    var password = els.loginPassword.value;
+    var emailData = authUi.buildInstitutionalEmail ? authUi.buildInstitutionalEmail(els.loginEmail ? els.loginEmail.value : "") : { ok: true, email: (els.loginEmail ? els.loginEmail.value.trim() : "") };
+    var password = els.loginPassword ? els.loginPassword.value : "";
     var authData = null;
 
+    clearAuthMessages();
+    hideResendConfirmation();
+
+    if (!emailData.ok) {
+      setFieldError(els.loginEmailError, emailData.error || "E-mail inválido.");
+      return;
+    }
+
+    if (!password) {
+      setFormStatus(els.loginStatus, "Informe sua senha.", "error");
+      return;
+    }
+
+    setSubmitLoading(els.loginButton, true, "Entrando...");
+
     try {
-      authData = await authenticate(email, password);
+      authData = await authenticate(emailData.email, password);
     } catch (err) {
-      if (els.loginError) els.loginError.textContent = err.message || "Erro ao autenticar no Supabase";
+      var loginErrorMessage = authUi.mapSupabaseError
+        ? authUi.mapSupabaseError(err, "Erro ao autenticar no Supabase.")
+        : (err && err.message ? err.message : "Erro ao autenticar no Supabase.");
+      setFormStatus(els.loginStatus, loginErrorMessage, "error");
+      if (authUi.isEmailNotConfirmedError && authUi.isEmailNotConfirmedError(err && err.message ? err.message : "")) {
+        resendConfirmationEmail = emailData.email;
+        showResendConfirmation();
+      }
+      setSubmitLoading(els.loginButton, false);
       return;
     }
 
@@ -481,15 +750,257 @@ function getUserIdFromUser(user) {
       var user = authData.user || session.user;
 
       await saveTokens(session);
+      resendConfirmationEmail = emailData.email;
 
       await saveUserId(getUserIdFromUser(user));
 
-      if (els.loginError) els.loginError.textContent = "";
+      setFormStatus(els.loginStatus, "", "");
       await initDashboard();
     } catch (err) {
       console.error("Post-login init failed:", err);
-      if (els.loginError) {
-        els.loginError.textContent = "Login feito, mas falhou ao carregar dados locais/sync: " + (err.message || err);
+      setFormStatus(els.loginStatus, "Login feito, mas falhou ao carregar dados locais/sync: " + (err.message || err), "error");
+    } finally {
+      setSubmitLoading(els.loginButton, false);
+    }
+  }
+
+  async function handleSignup(event) {
+    event.preventDefault();
+    clearAuthMessages();
+
+    var emailData = authUi.buildInstitutionalEmail ? authUi.buildInstitutionalEmail(els.signupEmail ? els.signupEmail.value : "") : { ok: true, email: (els.signupEmail ? els.signupEmail.value.trim() : "") };
+    var passwordValidation = updateSignupPasswordFeedback();
+
+    if (!emailData.ok) {
+      setFieldError(els.signupEmailError, emailData.error || "E-mail inválido.");
+      return;
+    }
+
+    if (!passwordValidation || !passwordValidation.valid) {
+      setFieldError(els.signupPasswordError, authUi.getPasswordHint ? authUi.getPasswordHint(passwordValidation) : "Senha fraca.");
+      return;
+    }
+
+    if (!els.signupPassword || !els.signupPasswordConfirm || els.signupPassword.value !== els.signupPasswordConfirm.value) {
+      setFieldError(els.signupConfirmError, "As senhas não coincidem.");
+      return;
+    }
+
+    if (!els.signupLgpdAccept || !els.signupLgpdAccept.checked) {
+      setFormStatus(els.signupStatus, "Para continuar, aceite os Termos de Uso e a Política de Privacidade.", "error");
+      return;
+    }
+
+    setSubmitLoading(els.signupButton, true, "Criando conta...");
+
+    try {
+      var client = window.MinutarioAPI.getClient();
+      if (!client) throw new Error("Cliente Supabase não disponível");
+
+      var result = await client.auth.signUp({
+        email: emailData.email,
+        password: els.signupPassword.value,
+        options: {
+          emailRedirectTo: getConfirmationRedirectUrl(),
+        },
+      });
+
+      if (result.error) throw result.error;
+
+      resendConfirmationEmail = emailData.email;
+      if (els.signupSuccessBox) {
+        els.signupSuccessBox.classList.remove("hidden");
+        els.signupSuccessBox.textContent =
+          "Conta criada com sucesso! Enviamos um e-mail de confirmação para " +
+          emailData.email +
+          ". Acesse seu e-mail institucional do TJPR e clique no link de confirmação para ativar sua conta.";
+      }
+      setFormStatus(els.signupStatus, "Cadastro concluído. Retornando ao login...", "success");
+      if (els.loginEmail) els.loginEmail.value = emailData.identifier || "";
+      showAuthView("login");
+      setFormStatus(els.loginStatus, "Seu cadastro foi criado. Confirme o e-mail para entrar.", "success");
+    } catch (err) {
+      var signupErrorMessage = authUi.mapSupabaseError
+        ? authUi.mapSupabaseError(err, "Erro ao criar conta.")
+        : (err && err.message ? err.message : "Erro ao criar conta.");
+      setFormStatus(els.signupStatus, signupErrorMessage, "error");
+    } finally {
+      setSubmitLoading(els.signupButton, false);
+    }
+  }
+
+  async function handleForgotPassword(event) {
+    event.preventDefault();
+    clearAuthMessages();
+
+    var emailData = authUi.buildInstitutionalEmail ? authUi.buildInstitutionalEmail(els.forgotEmail ? els.forgotEmail.value : "") : { ok: true, email: (els.forgotEmail ? els.forgotEmail.value.trim() : "") };
+    if (!emailData.ok) {
+      setFieldError(els.forgotEmailError, emailData.error || "E-mail inválido.");
+      return;
+    }
+
+    setSubmitLoading(els.forgotButton, true, "Enviando...");
+
+    try {
+      var client = window.MinutarioAPI.getClient();
+      if (!client) throw new Error("Cliente Supabase não disponível");
+      var result = await client.auth.resetPasswordForEmail(emailData.email, {
+        redirectTo: getPasswordResetRedirectUrl(),
+      });
+      if (result.error) throw result.error;
+      setFormStatus(
+        els.forgotStatus,
+        "Se o e-mail informado estiver cadastrado, você receberá um link para redefinição de senha.",
+        "success"
+      );
+    } catch (err) {
+      var forgotMessage = authUi.mapSupabaseError
+        ? authUi.mapSupabaseError(err, "Erro ao solicitar redefinição.")
+        : (err && err.message ? err.message : "Erro ao solicitar redefinição.");
+      setFormStatus(els.forgotStatus, forgotMessage, "error");
+    } finally {
+      setSubmitLoading(els.forgotButton, false);
+    }
+  }
+
+  async function handleResendConfirmation() {
+    if (!resendConfirmationEmail) {
+      setFormStatus(els.loginStatus, "Informe seu e-mail e tente novamente.", "error");
+      return;
+    }
+
+    if (els.resendButton) els.resendButton.disabled = true;
+    if (els.resendCountdown) els.resendCountdown.textContent = "Enviando...";
+
+    try {
+      var client = window.MinutarioAPI.getClient();
+      if (!client || !client.auth || typeof client.auth.resend !== "function") {
+        throw new Error("Reenvio de confirmação não disponível.");
+      }
+      var result = await client.auth.resend({
+        type: "signup",
+        email: resendConfirmationEmail,
+        options: { emailRedirectTo: getConfirmationRedirectUrl() },
+      });
+      if (result.error) throw result.error;
+      setFormStatus(els.loginStatus, "E-mail de confirmação reenviado com sucesso.", "success");
+      startResendCooldown(60);
+    } catch (err) {
+      var resendMessage = authUi.mapSupabaseError
+        ? authUi.mapSupabaseError(err, "Falha ao reenviar confirmação.")
+        : (err && err.message ? err.message : "Falha ao reenviar confirmação.");
+      setFormStatus(els.loginStatus, resendMessage, "error");
+      if (els.resendButton) els.resendButton.disabled = false;
+      if (els.resendCountdown) els.resendCountdown.textContent = "";
+    }
+  }
+
+  async function restoreRecoverySessionFromUrl(urlValue) {
+    var url;
+    var code;
+    var hashParams;
+    var accessToken;
+    var refreshToken;
+    var client = window.MinutarioAPI.getClient();
+
+    if (!client || !client.auth) {
+      throw new Error("Cliente Supabase não disponível");
+    }
+
+    url = new URL(String(urlValue || ""));
+    code = url.searchParams.get("code");
+    hashParams = new URLSearchParams(url.hash ? url.hash.replace(/^#/, "") : "");
+    accessToken = hashParams.get("access_token");
+    refreshToken = hashParams.get("refresh_token");
+
+    if (code && client.auth.exchangeCodeForSession) {
+      var codeResult = await client.auth.exchangeCodeForSession(code);
+      if (codeResult.error) throw codeResult.error;
+      if (codeResult.data && codeResult.data.session && window.MinutarioAPI.saveAuthSession) {
+        await window.MinutarioAPI.saveAuthSession(codeResult.data.session);
+      }
+      return;
+    }
+
+    if (accessToken && refreshToken) {
+      var sessionResult = await client.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (sessionResult.error) throw sessionResult.error;
+      if (sessionResult.data && sessionResult.data.session && window.MinutarioAPI.saveAuthSession) {
+        await window.MinutarioAPI.saveAuthSession(sessionResult.data.session);
+      }
+      return;
+    }
+
+    throw new Error("Link de redefinição inválido.");
+  }
+
+  async function handleResetPassword(event) {
+    event.preventDefault();
+    clearAuthMessages();
+
+    var validation = updateResetPasswordFeedback();
+    if (!validation || !validation.valid) {
+      setFormStatus(els.resetStatus, "Senha fraca. Ajuste os critérios obrigatórios.", "error");
+      return;
+    }
+
+    if (!els.resetNewPassword || !els.resetConfirmPassword || els.resetNewPassword.value !== els.resetConfirmPassword.value) {
+      setFieldError(els.resetConfirmError, "As senhas não coincidem.");
+      setFormStatus(els.resetStatus, "As senhas não coincidem.", "error");
+      return;
+    }
+
+    setSubmitLoading(els.resetButton, true, "Salvando...");
+
+    try {
+      var client = window.MinutarioAPI.getClient();
+      var result = await client.auth.updateUser({ password: els.resetNewPassword.value });
+      if (result.error) throw result.error;
+      setFormStatus(els.resetStatus, "Senha atualizada com sucesso. Faça login novamente.", "success");
+      if (els.resetForm) els.resetForm.reset();
+      updateResetPasswordFeedback();
+      showAuthView("login");
+      setFormStatus(els.loginStatus, "Senha redefinida com sucesso. Faça login.", "success");
+    } catch (err) {
+      var resetMessage = authUi.mapSupabaseError
+        ? authUi.mapSupabaseError(err, "Erro ao atualizar senha.")
+        : (err && err.message ? err.message : "Erro ao atualizar senha.");
+      setFormStatus(els.resetStatus, resetMessage, "error");
+    } finally {
+      setSubmitLoading(els.resetButton, false);
+    }
+  }
+
+  async function consumeDeepLinkIfAny() {
+    var invoke = getTauriInvoke();
+    var pendingUrl = null;
+
+    if (!invoke) return;
+
+    try {
+      pendingUrl = await invoke("consume_pending_deep_link");
+    } catch (err) {
+      pendingUrl = null;
+    }
+
+    if (!pendingUrl) return;
+
+    if (String(pendingUrl).indexOf("/confirmed") !== -1) {
+      showAuthView("login");
+      setFormStatus(els.loginStatus, "E-mail confirmado com sucesso. Faça login para continuar.", "success");
+      return;
+    }
+
+    if (String(pendingUrl).indexOf("/password-reset") !== -1) {
+      showAuthView("reset");
+      try {
+        await restoreRecoverySessionFromUrl(pendingUrl);
+        setFormStatus(els.resetStatus, "Digite e confirme sua nova senha.", "success");
+      } catch (err) {
+        setFormStatus(els.resetStatus, "Link expirado. Solicite novo e-mail de redefinição.", "error");
       }
     }
   }
@@ -1382,36 +1893,25 @@ function getUserIdFromUser(user) {
 
   // App init
   async function init() {
-    var tokens = getStoredTokens();
-
-    if (tokens.accessToken && tokens.refreshToken) {
-      try {
-        var client = window.MinutarioAPI.getClient();
-        if (client) {
-          await client.auth.setSession({
-            access_token: tokens.accessToken,
-            refresh_token: tokens.refreshToken
-          });
-
-          var userResult = await client.auth.getUser();
-          if (userResult.error) {
-            throw userResult.error;
-          }
-
-          var user = userResult.data.user;
-          await saveUserId(getUserIdFromUser(user));
-
+    try {
+      var client = window.MinutarioAPI.getClient();
+      if (client && window.MinutarioAPI.restoreSessionFromStorage) {
+        await window.MinutarioAPI.restoreSessionFromStorage(client);
+        var userResult = await client.auth.getUser();
+        if (userResult && !userResult.error && userResult.data && userResult.data.user) {
+          await saveUserId(getUserIdFromUser(userResult.data.user));
           await initDashboard();
           return;
         }
-      } catch (err) {
-        console.error("Auth restore failed:", err);
-          await clearTokens();
       }
+    } catch (err) {
+      console.error("Auth restore failed:", err);
+      await clearTokens();
     }
 
     if (els.loginScreen) {
       showLoginScreen();
+      await consumeDeepLinkIfAny();
     } else {
       // dashboard.html não tem login screen - carrega diretamente
       await initDashboard();
@@ -1421,6 +1921,26 @@ function getUserIdFromUser(user) {
   // Events
   function bindEvents() {
     if (els.loginForm) els.loginForm.addEventListener("submit", handleLogin);
+    if (els.signupForm) els.signupForm.addEventListener("submit", handleSignup);
+    if (els.forgotForm) els.forgotForm.addEventListener("submit", handleForgotPassword);
+    if (els.resetForm) els.resetForm.addEventListener("submit", handleResetPassword);
+    if (els.goSignup) els.goSignup.addEventListener("click", function () { showAuthView("signup"); });
+    if (els.goForgot) els.goForgot.addEventListener("click", function () { showAuthView("forgot"); });
+    if (els.backToLoginFromSignup) els.backToLoginFromSignup.addEventListener("click", function () { showAuthView("login"); });
+    if (els.backToLoginFromForgot) els.backToLoginFromForgot.addEventListener("click", function () { showAuthView("login"); });
+    if (els.backToLoginFromReset) els.backToLoginFromReset.addEventListener("click", function () { showAuthView("login"); });
+    if (els.resendButton) els.resendButton.addEventListener("click", handleResendConfirmation);
+    if (els.signupLgpdAccept) {
+      els.signupLgpdAccept.addEventListener("change", function () {
+        if (els.signupButton) {
+          els.signupButton.disabled = !els.signupLgpdAccept.checked;
+        }
+      });
+    }
+    if (els.signupPassword) els.signupPassword.addEventListener("input", updateSignupPasswordFeedback);
+    if (els.signupPasswordConfirm) els.signupPasswordConfirm.addEventListener("input", updateSignupConfirmFeedback);
+    if (els.resetNewPassword) els.resetNewPassword.addEventListener("input", updateResetPasswordFeedback);
+    if (els.resetConfirmPassword) els.resetConfirmPassword.addEventListener("input", updateResetConfirmFeedback);
     if (els.logoutBtn) els.logoutBtn.addEventListener("click", handleLogout);
     if (els.searchInput) els.searchInput.addEventListener("input", handleSearchInput);
     if (els.newTemplateBtn) els.newTemplateBtn.addEventListener("click", handleNewTemplate);
@@ -1433,6 +1953,24 @@ function getUserIdFromUser(user) {
     if (els.renameFolderBtn) els.renameFolderBtn.addEventListener("click", handleRenameFolder);
     if (els.deleteFolderBtn) els.deleteFolderBtn.addEventListener("click", handleDeleteFolder);
     document.addEventListener("keydown", handleKeydown);
+
+    if (authUi.setupPasswordToggle) {
+      authUi.setupPasswordToggle(els.loginPassword, document.getElementById("toggle-login-password"));
+      authUi.setupPasswordToggle(els.signupPassword, document.getElementById("toggle-signup-password"));
+      authUi.setupPasswordToggle(els.signupPasswordConfirm, document.getElementById("toggle-signup-password-confirm"));
+      authUi.setupPasswordToggle(els.resetNewPassword, document.getElementById("toggle-reset-new-password"));
+      authUi.setupPasswordToggle(els.resetConfirmPassword, document.getElementById("toggle-reset-confirm-password"));
+    }
+
+    if (
+      window.__TAURI__ &&
+      window.__TAURI__.event &&
+      typeof window.__TAURI__.event.listen === "function"
+    ) {
+      window.__TAURI__.event.listen("minutario://deep-link", function () {
+        consumeDeepLinkIfAny();
+      });
+    }
   }
 
   cacheElements();

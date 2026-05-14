@@ -6,6 +6,7 @@
   <title>Minutário</title>
   <link rel="stylesheet" href="lib/quill.snow.css">
   <link rel="stylesheet" href="assets/dashboard.css">
+  <link rel="stylesheet" href="shared/auth-ui.css">
   <style>
     .login-screen {
       display: flex;
@@ -21,7 +22,7 @@
       background: #16213e;
       border-radius: 12px;
       padding: 40px 32px;
-      width: 360px;
+      width: min(460px, calc(100vw - 40px));
       box-shadow: 0 8px 32px rgba(0,0,0,.3);
     }
     .login-screen .login-brand {
@@ -42,43 +43,49 @@
     }
     .login-screen .login-brand h1 { margin: 0; font-size: 24px; }
     .login-screen .login-brand p { margin: 4px 0 0; color: #8892b0; font-size: 13px; }
-    .login-screen label { display: block; margin-bottom: 4px; font-size: 13px; color: #a8b2d1; }
-    .login-screen input[type="email"],
-    .login-screen input[type="password"] {
-      width: 100%;
-      padding: 10px 12px;
-      margin-bottom: 16px;
-      border: 1px solid #233554;
-      border-radius: 8px;
+    .login-screen .auth-label,
+    .login-screen .field-error,
+    .login-screen .password-strength,
+    .login-screen .form-status,
+    .login-screen .auth-note {
+      color: #a8b2d1;
+    }
+    .login-screen .auth-input {
       background: #0f3460;
       color: #fff;
-      font-size: 14px;
-      box-sizing: border-box;
+      border: 1px solid #233554;
     }
-    .login-screen input:focus { outline: none; border-color: #e94560; }
-    .login-screen .login-btn {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 8px;
+    .login-screen .domain-suffix {
+      background: #102847;
+      color: #cbd5e1;
+      border-color: #233554;
+    }
+    .login-screen .auth-button {
       background: #e94560;
       color: #fff;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
     }
-    .login-screen .login-btn:hover { background: #c73652; }
-    .login-screen .login-error {
-      color: #ff6b6b;
-      font-size: 13px;
-      margin-top: 12px;
-      min-height: 18px;
+    .login-screen .auth-secondary-btn {
+      background: #102847;
+      border-color: #233554;
+      color: #e2e8f0;
     }
-    .login-screen .login-hint {
-      color: #5a6a8a;
+    .login-screen .auth-link-btn,
+    .login-screen .auth-doc-link {
+      color: #93c5fd;
+    }
+    .login-screen .auth-success-box {
+      border: 1px solid rgba(134, 239, 172, 0.42);
+      background: rgba(20, 83, 45, 0.42);
+      color: #bbf7d0;
+      border-radius: 8px;
+      padding: 8px 10px;
       font-size: 12px;
-      text-align: center;
-      margin-top: 16px;
+      line-height: 1.4;
+    }
+    .login-screen .auth-note {
+      color: #93a4c7;
+      font-size: 12px;
+      margin: 8px 0 0;
     }
   </style>
 </head>
@@ -90,15 +97,123 @@
         <h1>Minutário</h1>
         <p>Expansão de atalhos de texto</p>
       </div>
-      <form id="login-form">
-        <label for="login-email">Email</label>
-        <input type="email" id="login-email" placeholder="seu@email.com" required>
-        <label for="login-password">Senha</label>
-        <input type="password" id="login-password" placeholder="Sua senha" required>
-        <button type="submit" class="login-btn">Entrar</button>
-      </form>
-      <div id="login-error" class="login-error"></div>
-      <p class="login-hint">Use a mesma conta da extensão para acessar seus templates.</p>
+      <div class="auth-views">
+        <div id="login-view" class="auth-view">
+          <form id="login-form" class="auth-form">
+            <label class="auth-label" for="login-email-id">E-mail institucional</label>
+            <div class="auth-input-wrap">
+              <input id="login-email-id" class="auth-input" type="text" placeholder="seunome" autocomplete="username" required>
+              <span class="domain-suffix">@tjpr.jus.br</span>
+            </div>
+            <span id="login-email-error" class="field-error"></span>
+
+            <label class="auth-label" for="login-password">Senha</label>
+            <div class="password-wrap">
+              <input id="login-password" class="auth-input" type="password" autocomplete="current-password" required>
+              <button id="toggle-login-password" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+            <div class="auth-inline-links">
+              <button id="go-forgot" class="auth-link-btn" type="button">Esqueci minha senha</button>
+              <button id="go-signup" class="auth-link-btn" type="button">Criar conta</button>
+            </div>
+            <button id="login-btn" class="auth-button" type="submit">
+              <span class="auth-submit-content"><span class="btn-text">Entrar</span></span>
+            </button>
+            <div id="login-status" class="form-status"></div>
+          </form>
+          <div id="resend-confirmation-wrap" class="resend-wrap hidden">
+            <button id="resend-confirmation-btn" class="auth-secondary-btn" type="button">Reenviar e-mail de confirmação</button>
+            <span id="resend-countdown" class="form-status"></span>
+          </div>
+        </div>
+
+        <div id="signup-view" class="auth-view hidden">
+          <form id="signup-form" class="auth-form">
+            <label class="auth-label" for="signup-email-id">E-mail institucional</label>
+            <div class="auth-input-wrap">
+              <input id="signup-email-id" class="auth-input" type="text" placeholder="seunome" autocomplete="email" required>
+              <span class="domain-suffix">@tjpr.jus.br</span>
+            </div>
+            <span id="signup-email-error" class="field-error"></span>
+
+            <label class="auth-label" for="signup-password">Senha</label>
+            <div class="password-wrap">
+              <input id="signup-password" class="auth-input" type="password" autocomplete="new-password" required>
+              <button id="toggle-signup-password" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+            <span id="signup-password-strength" class="password-strength"></span>
+            <span id="signup-password-error" class="field-error"></span>
+
+            <label class="auth-label" for="signup-password-confirm">Confirmar senha</label>
+            <div class="password-wrap">
+              <input id="signup-password-confirm" class="auth-input" type="password" autocomplete="new-password" required>
+              <button id="toggle-signup-password-confirm" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+            <span id="signup-confirm-error" class="field-error"></span>
+
+            <label class="lgpd-check">
+              <input id="signup-lgpd-accept" type="checkbox">
+              <span>
+                Li e aceito os
+                <a id="terms-link" class="auth-doc-link" href="shared/terms.html" target="_blank" rel="noopener noreferrer">Termos de Uso</a>
+                e a
+                <a id="privacy-link" class="auth-doc-link" href="shared/privacy.html" target="_blank" rel="noopener noreferrer">Política de Privacidade</a>.
+              </span>
+            </label>
+
+            <button id="signup-btn" class="auth-button" type="submit" disabled>
+              <span class="auth-submit-content"><span class="btn-text">Criar Conta</span></span>
+            </button>
+            <button id="back-to-login-from-signup" class="auth-secondary-btn" type="button">Voltar ao Login</button>
+            <div id="signup-status" class="form-status"></div>
+          </form>
+        </div>
+
+        <div id="forgot-view" class="auth-view hidden">
+          <form id="forgot-form" class="auth-form">
+            <label class="auth-label" for="forgot-email-id">E-mail institucional</label>
+            <div class="auth-input-wrap">
+              <input id="forgot-email-id" class="auth-input" type="text" placeholder="seunome" autocomplete="email" required>
+              <span class="domain-suffix">@tjpr.jus.br</span>
+            </div>
+            <span id="forgot-email-error" class="field-error"></span>
+
+            <button id="forgot-btn" class="auth-button" type="submit">
+              <span class="auth-submit-content"><span class="btn-text">Enviar link de redefinição</span></span>
+            </button>
+            <button id="back-to-login-from-forgot" class="auth-secondary-btn" type="button">Voltar ao Login</button>
+            <div id="forgot-status" class="form-status"></div>
+          </form>
+        </div>
+
+        <div id="reset-view" class="auth-view hidden">
+          <form id="reset-form" class="auth-form">
+            <label class="auth-label" for="reset-new-password">Nova senha</label>
+            <div class="password-wrap">
+              <input id="reset-new-password" class="auth-input" type="password" autocomplete="new-password" required>
+              <button id="toggle-reset-new-password" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+            <span id="reset-password-strength" class="password-strength"></span>
+            <span id="reset-password-error" class="field-error"></span>
+
+            <label class="auth-label" for="reset-confirm-password">Confirmar nova senha</label>
+            <div class="password-wrap">
+              <input id="reset-confirm-password" class="auth-input" type="password" autocomplete="new-password" required>
+              <button id="toggle-reset-confirm-password" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+            <span id="reset-confirm-error" class="field-error"></span>
+
+            <button id="reset-btn" class="auth-button" type="submit">
+              <span class="auth-submit-content"><span class="btn-text">Salvar nova senha</span></span>
+            </button>
+            <button id="back-to-login-from-reset" class="auth-secondary-btn" type="button">Voltar ao Login</button>
+            <div id="reset-status" class="form-status"></div>
+          </form>
+        </div>
+
+        <div id="signup-success-box" class="auth-success-box hidden"></div>
+      </div>
+      <p class="auth-note">Coletamos somente e-mail institucional e credenciais de autenticação para acesso ao sistema.</p>
     </div>
   </div>
 
@@ -183,6 +298,7 @@
   <script src="shared/db.js"></script>
   <script src="shared/api.js"></script>
   <script src="shared/sync.js"></script>
+  <script src="shared/auth-ui.js"></script>
   <script src="sync/csv.js"></script>
   <script src="sync/supabase.js"></script>
   <script src="sync/index.js"></script>

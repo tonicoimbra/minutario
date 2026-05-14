@@ -23,6 +23,25 @@ const migrationState = {
   failed: false,
 };
 
+async function ensureSessionStorageAccessLevel() {
+  if (
+    !chrome ||
+    !chrome.storage ||
+    !chrome.storage.session ||
+    typeof chrome.storage.session.setAccessLevel !== "function"
+  ) {
+    return;
+  }
+
+  try {
+    await chrome.storage.session.setAccessLevel({
+      accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS",
+    });
+  } catch (error) {
+    // ignore unsupported browsers/contexts
+  }
+}
+
 function getErrorMessage(exception) {
   if (!exception) {
     return "";
@@ -278,6 +297,7 @@ async function runStartupMigration() {
 }
 
 const migrationPromise = runStartupMigration();
+void ensureSessionStorageAccessLevel();
 
 async function openDashboard(payload) {
   const dashboardUrl = chrome.runtime.getURL("dashboard/dashboard.html");
@@ -459,12 +479,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  void ensureSessionStorageAccessLevel();
   chrome.alarms.create(SYNC_ALARM_NAME, {
     periodInMinutes: SYNC_INTERVAL_MINUTES,
   });
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  void ensureSessionStorageAccessLevel();
   chrome.alarms.create(SYNC_ALARM_NAME, {
     periodInMinutes: SYNC_INTERVAL_MINUTES,
   });

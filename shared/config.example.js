@@ -9,7 +9,9 @@
     FOLDERS_TABLE: "folders",
     LAST_SYNC_KEY: "minutario_last_sync",
     AUTH_TOKEN_KEY: "minutario_auth_token",
+    EMAIL_CONFIRMATION_REDIRECT_URL: "",
     PASSWORD_RESET_REDIRECT_URL: "",
+    PASSWORD_RESET_DESKTOP_REDIRECT_URL: "tauri://localhost/password-reset",
     DEBUG_LOGS: false,
   };
   global.MinutarioConfig = CONFIG;

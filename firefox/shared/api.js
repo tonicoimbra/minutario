@@ -3,6 +3,8 @@
   var supabaseClient = null;
   var AUTH_ACCESS_TOKEN_KEY = "minutario_access_token";
   var AUTH_REFRESH_TOKEN_KEY = "minutario_refresh_token";
+  var AUTH_SERVICE_NAME = "com.minutario.desktop.auth";
+  var memorySession = null;
 
   function debugLog(message, details) {
     if (!CONFIG.DEBUG_LOGS || !global.console || typeof global.console.log !== "function") {
@@ -24,31 +26,29 @@
     return supabaseClient;
   }
 
-  async function storageGet(keys) {
-    if (!global.chrome || !global.chrome.storage || !global.chrome.storage.local || !global.chrome.storage.local.get) {
-      return {};
-    }
-
-    return await global.chrome.storage.local.get(keys);
+  function getExtensionStorageSession() {
+    if (!global.chrome || !global.chrome.storage) return null;
+    if (!global.chrome.storage.session) return null;
+    return global.chrome.storage.session;
   }
 
-  async function storageSet(items) {
-    if (!global.chrome || !global.chrome.storage || !global.chrome.storage.local || !global.chrome.storage.local.set) {
-      return;
-    }
-
-    await global.chrome.storage.local.set(items);
+  function getExtensionStorageLocal() {
+    if (!global.chrome || !global.chrome.storage) return null;
+    if (!global.chrome.storage.local) return null;
+    return global.chrome.storage.local;
   }
 
-  async function storageRemove(keys) {
-    if (!global.chrome || !global.chrome.storage || !global.chrome.storage.local || !global.chrome.storage.local.remove) {
-      return;
+  function getTauriInvoke() {
+    try {
+      return global.__TAURI__ && global.__TAURI__.core && typeof global.__TAURI__.core.invoke === "function"
+        ? global.__TAURI__.core.invoke
+        : null;
+    } catch (err) {
+      return null;
     }
-
-    await global.chrome.storage.local.remove(keys);
   }
 
-  function getLocalToken(key) {
+  function readLegacyLocalToken(key) {
     try {
       return global.localStorage && global.localStorage.getItem ? global.localStorage.getItem(key) : null;
     } catch (err) {
@@ -56,23 +56,41 @@
     }
   }
 
-  function setLocalToken(key, value) {
-    try {
-      if (global.localStorage && global.localStorage.setItem) {
-        global.localStorage.setItem(key, value);
-      }
-    } catch (err) {
-      // ignore unavailable localStorage contexts, such as MV3 service workers
-    }
-  }
-
-  function removeLocalToken(key) {
+  function clearLegacyLocalToken(key) {
     try {
       if (global.localStorage && global.localStorage.removeItem) {
         global.localStorage.removeItem(key);
       }
     } catch (err) {
-      // ignore unavailable localStorage contexts, such as MV3 service workers
+      // ignore
+    }
+  }
+
+  async function storageGet(area, keys) {
+    if (!area || typeof area.get !== "function") return {};
+    try {
+      return await area.get(keys);
+    } catch (err) {
+      return {};
+    }
+  }
+
+  async function storageSet(area, items) {
+    if (!area || typeof area.set !== "function") return false;
+    try {
+      await area.set(items);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async function storageRemove(area, keys) {
+    if (!area || typeof area.remove !== "function") return;
+    try {
+      await area.remove(keys);
+    } catch (err) {
+      // ignore
     }
   }
 
@@ -80,36 +98,108 @@
     if (!session || !session.access_token || !session.refresh_token) {
       return;
     }
+    memorySession = {
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+    };
 
-    setLocalToken(AUTH_ACCESS_TOKEN_KEY, session.access_token);
-    setLocalToken(AUTH_REFRESH_TOKEN_KEY, session.refresh_token);
-    await storageSet({
+    var tauriInvoke = getTauriInvoke();
+    if (tauriInvoke) {
+      await tauriInvoke("store_auth_session", {
+        service: AUTH_SERVICE_NAME,
+        accessToken: session.access_token,
+        refreshToken: session.refresh_token,
+      });
+      clearLegacyLocalToken(AUTH_ACCESS_TOKEN_KEY);
+      clearLegacyLocalToken(AUTH_REFRESH_TOKEN_KEY);
+      return;
+    }
+
+    var sessionArea = getExtensionStorageSession();
+    var savedInSessionArea = await storageSet(sessionArea, {
       [AUTH_ACCESS_TOKEN_KEY]: session.access_token,
       [AUTH_REFRESH_TOKEN_KEY]: session.refresh_token,
     });
+
+    if (!savedInSessionArea) {
+      await storageSet(getExtensionStorageLocal(), {
+        [AUTH_ACCESS_TOKEN_KEY]: session.access_token,
+        [AUTH_REFRESH_TOKEN_KEY]: session.refresh_token,
+      });
+    }
+
+    clearLegacyLocalToken(AUTH_ACCESS_TOKEN_KEY);
+    clearLegacyLocalToken(AUTH_REFRESH_TOKEN_KEY);
   }
 
   async function clearAuthSession() {
-    removeLocalToken(AUTH_ACCESS_TOKEN_KEY);
-    removeLocalToken(AUTH_REFRESH_TOKEN_KEY);
-    await storageRemove([AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
+    memorySession = null;
+
+    var tauriInvoke = getTauriInvoke();
+    if (tauriInvoke) {
+      try {
+        await tauriInvoke("clear_auth_session", { service: AUTH_SERVICE_NAME });
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    await storageRemove(getExtensionStorageSession(), [AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
+    await storageRemove(getExtensionStorageLocal(), [AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
+    clearLegacyLocalToken(AUTH_ACCESS_TOKEN_KEY);
+    clearLegacyLocalToken(AUTH_REFRESH_TOKEN_KEY);
   }
 
   async function readStoredSession() {
-    var accessToken = getLocalToken(AUTH_ACCESS_TOKEN_KEY);
-    var refreshToken = getLocalToken(AUTH_REFRESH_TOKEN_KEY);
+    var tauriInvoke = getTauriInvoke();
+    var accessToken = null;
+    var refreshToken = null;
+    var stored = null;
 
-    if (accessToken && refreshToken) {
-      return { access_token: accessToken, refresh_token: refreshToken };
+    if (tauriInvoke) {
+      try {
+        stored = await tauriInvoke("read_auth_session", { service: AUTH_SERVICE_NAME });
+        accessToken = stored && stored.access_token ? stored.access_token : null;
+        refreshToken = stored && stored.refresh_token ? stored.refresh_token : null;
+      } catch (err) {
+        accessToken = null;
+        refreshToken = null;
+      }
+      if (accessToken && refreshToken) {
+        memorySession = { access_token: accessToken, refresh_token: refreshToken };
+        return memorySession;
+      }
     }
 
-    var stored = await storageGet([AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
+    if (memorySession && memorySession.access_token && memorySession.refresh_token) {
+      return memorySession;
+    }
+
+    stored = await storageGet(getExtensionStorageSession(), [AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
     accessToken = stored && stored[AUTH_ACCESS_TOKEN_KEY];
     refreshToken = stored && stored[AUTH_REFRESH_TOKEN_KEY];
+    if (accessToken && refreshToken) {
+      memorySession = { access_token: accessToken, refresh_token: refreshToken };
+      return memorySession;
+    }
 
-    return accessToken && refreshToken
-      ? { access_token: accessToken, refresh_token: refreshToken }
-      : null;
+    stored = await storageGet(getExtensionStorageLocal(), [AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
+    accessToken = stored && stored[AUTH_ACCESS_TOKEN_KEY];
+    refreshToken = stored && stored[AUTH_REFRESH_TOKEN_KEY];
+    if (accessToken && refreshToken) {
+      memorySession = { access_token: accessToken, refresh_token: refreshToken };
+      return memorySession;
+    }
+
+    accessToken = readLegacyLocalToken(AUTH_ACCESS_TOKEN_KEY);
+    refreshToken = readLegacyLocalToken(AUTH_REFRESH_TOKEN_KEY);
+    if (accessToken && refreshToken) {
+      memorySession = { access_token: accessToken, refresh_token: refreshToken };
+      await saveAuthSession(memorySession);
+      return memorySession;
+    }
+
+    return null;
   }
 
   async function restoreSessionFromStorage(client) {

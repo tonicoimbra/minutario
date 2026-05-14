@@ -11,6 +11,7 @@ npm-debug.log*
 # Supabase credentials (use config.example.js as template)
 shared/config.js
 firefox/shared/config.js
+minutario-desktop/src/shared/config.js
 
 # Local extension packages
 dist/

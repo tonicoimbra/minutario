@@ -5,60 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Minutário</title>
     <link rel="stylesheet" href="./popup.css" />
+    <link rel="stylesheet" href="../shared/auth-ui.css" />
     <style>
-      .hidden { display: none !important; }
-      .login-form { display: flex; flex-direction: column; gap: 10px; }
-      .login-form input {
-        padding: 10px 12px;
-        border: 1px solid var(--slate-200);
-        border-radius: 8px;
-        font-family: inherit;
-        font-size: 13px;
+      .hidden {
+        display: none !important;
       }
-      #login-btn {
-        width: 100%;
-        border: 0;
-        border-radius: 10px;
-        background: var(--tjpr-navy-800);
-        color: #ffffff;
-        font-family: inherit;
-        font-size: 13px;
-        font-weight: 700;
-        padding: 11px 12px;
-        cursor: pointer;
-        transition: transform 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
-        box-shadow: 0 8px 18px rgba(27, 38, 59, 0.18);
+
+      .auth-note {
+        margin: 0;
+        color: var(--slate-500);
+        font-size: 11px;
+        line-height: 1.4;
       }
-      #login-btn:hover {
-        background: var(--tjpr-navy-700);
-        box-shadow: 0 10px 22px rgba(27, 38, 59, 0.24);
-        transform: translateY(-1px);
-      }
-      .login-error {
-        color: #dc2626;
-        font-size: 12px;
-        margin: 8px 0 0;
-        min-height: 18px;
-      }
-      .login-help {
-        display: flex;
-        justify-content: center;
-        margin-top: 10px;
-        font-size: 12px;
-      }
-      .login-help button {
-        border: 0;
-        background: transparent;
-        color: var(--tjpr-navy-700);
-        cursor: pointer;
-        font-family: inherit;
-        font-size: 12px;
-        padding: 0;
-      }
-      .login-help button:hover {
-        color: var(--tjpr-navy-800);
-        text-decoration: underline;
-      }
+
       .user-info {
         display: flex;
         justify-content: space-between;
@@ -67,6 +26,7 @@
         padding-bottom: 10px;
         border-bottom: 1px solid var(--slate-200);
       }
+
       .user-email {
         font-size: 13px;
         font-weight: 700;
@@ -76,16 +36,19 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
       .sync-status {
         font-size: 11px;
         color: var(--slate-500);
       }
+
       .action-buttons {
         display: flex;
         flex-direction: column;
         gap: 8px;
         margin-bottom: 14px;
       }
+
       .action-buttons button {
         width: 100%;
         border-radius: 10px;
@@ -96,97 +59,81 @@
         cursor: pointer;
         transition: transform 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
       }
+
       #open-quick-access {
         border: 0;
         background: var(--tjpr-navy-800);
         color: #ffffff;
         box-shadow: 0 8px 18px rgba(27, 38, 59, 0.18);
       }
+
       #open-quick-access:hover {
         background: var(--tjpr-navy-700);
         box-shadow: 0 10px 22px rgba(27, 38, 59, 0.24);
         transform: translateY(-1px);
       }
+
       #open-dashboard {
         border: 1px solid var(--slate-200);
         background: #ffffff;
         color: var(--slate-700);
         box-shadow: none;
       }
+
       #open-dashboard:hover {
         background: var(--slate-100);
         border-color: rgba(65, 90, 119, 0.42);
         transform: translateY(-1px);
       }
+
       #force-sync {
         border: 0;
         background: var(--tjpr-navy-700);
         color: #ffffff;
         box-shadow: 0 8px 18px rgba(27, 38, 59, 0.18);
       }
+
       #force-sync:hover {
         background: var(--tjpr-navy-600);
         box-shadow: 0 10px 22px rgba(27, 38, 59, 0.24);
         transform: translateY(-1px);
       }
+
       #logout {
         border: 1px solid var(--slate-200);
         background: var(--slate-100);
         color: var(--slate-700);
         box-shadow: none;
       }
+
       #logout:hover {
         background: #ffffff;
         border-color: rgba(65, 90, 119, 0.42);
         transform: translateY(-1px);
       }
-      #toggle-password-form {
-        border: 1px solid var(--slate-200);
-        background: #ffffff;
-        color: var(--slate-700);
-        box-shadow: none;
-      }
-      #toggle-password-form:hover {
-        background: var(--slate-100);
-        border-color: rgba(65, 90, 119, 0.42);
-        transform: translateY(-1px);
-      }
-      .password-form {
-        margin: -4px 0 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      .password-form input {
-        padding: 10px 12px;
-        border: 1px solid var(--slate-200);
-        border-radius: 8px;
-        font-family: inherit;
-        font-size: 13px;
-      }
-      .password-actions {
-        display: flex;
-        gap: 8px;
-      }
-      .password-actions button {
-        flex: 1;
-      }
-      #save-password-btn {
-        border: 0;
-        background: var(--tjpr-navy-800);
-        color: #ffffff;
-      }
-      #cancel-password-btn {
-        border: 1px solid var(--slate-200);
-        background: var(--slate-100);
-        color: var(--slate-700);
-      }
+
       .account-status {
         margin: 0 2px 8px;
         min-height: 16px;
         color: var(--slate-500);
         font-size: 11px;
         line-height: 1.35;
+      }
+
+      .auth-success-box {
+        border: 1px solid #bbf7d0;
+        background: #f0fdf4;
+        color: #166534;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+
+      .auth-submit-content {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
     </style>
   </head>
@@ -200,19 +147,105 @@
       </div>
     </header>
 
-    <section id="login-section" class="popup-card hidden">
-      <form id="login-form" class="login-form">
-        <input type="email" id="login-email" placeholder="Email" required autocomplete="email" />
-        <input type="password" id="login-password" placeholder="Senha" required autocomplete="current-password" />
-        <button type="submit" id="login-btn">Entrar</button>
-      </form>
-      <p style="margin: 10px 0 0; color: var(--slate-500); font-size: 11px; line-height: 1.35;">
-        Conta criada pelo administrador. Use seu email e senha.
-      </p>
-      <div class="login-help">
-        <button id="forgot-password" type="button">Esqueci minha senha</button>
+    <section id="auth-section" class="popup-card hidden">
+      <div class="auth-views">
+        <div id="login-view" class="auth-view fade-enter">
+          <form id="login-form" class="auth-form">
+            <label class="auth-label" for="login-email-id">E-mail institucional</label>
+            <div class="auth-input-wrap">
+              <input id="login-email-id" class="auth-input" type="text" placeholder="seunome" autocomplete="username" required />
+              <span class="domain-suffix">@tjpr.jus.br</span>
+            </div>
+            <input id="login-email" type="text" class="hidden" />
+            <span id="login-email-error" class="field-error" aria-live="polite"></span>
+
+            <label class="auth-label" for="login-password">Senha</label>
+            <div class="password-wrap">
+              <input id="login-password" class="auth-input" type="password" autocomplete="current-password" required />
+              <button id="toggle-login-password" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+
+            <div class="auth-inline-links">
+              <button id="go-forgot" class="auth-link-btn" type="button">Esqueci minha senha</button>
+              <button id="go-signup" class="auth-link-btn" type="button">Criar conta</button>
+            </div>
+            <button id="forgot-password" type="button" class="hidden">Esqueci minha senha (compat)</button>
+
+            <button id="login-btn" class="auth-button" type="submit">
+              <span class="auth-submit-content"><span class="btn-text">Entrar</span></span>
+            </button>
+            <div id="login-status" class="form-status" aria-live="polite"></div>
+            <p id="login-error" class="hidden"></p>
+          </form>
+
+          <div id="resend-confirmation-wrap" class="resend-wrap hidden">
+            <button id="resend-confirmation-btn" class="auth-secondary-btn" type="button">Reenviar e-mail de confirmação</button>
+            <span id="resend-countdown" class="form-status"></span>
+          </div>
+        </div>
+
+        <div id="signup-view" class="auth-view hidden">
+          <form id="signup-form" class="auth-form">
+            <label class="auth-label" for="signup-email-id">E-mail institucional</label>
+            <div class="auth-input-wrap">
+              <input id="signup-email-id" class="auth-input" type="text" placeholder="seunome" autocomplete="email" required />
+              <span class="domain-suffix">@tjpr.jus.br</span>
+            </div>
+            <span id="signup-email-error" class="field-error" aria-live="polite"></span>
+
+            <label class="auth-label" for="signup-password">Senha</label>
+            <div class="password-wrap">
+              <input id="signup-password" class="auth-input" type="password" autocomplete="new-password" required />
+              <button id="toggle-signup-password" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+            <span id="signup-password-strength" class="password-strength"></span>
+            <span id="signup-password-error" class="field-error" aria-live="polite"></span>
+
+            <label class="auth-label" for="signup-password-confirm">Confirmar senha</label>
+            <div class="password-wrap">
+              <input id="signup-password-confirm" class="auth-input" type="password" autocomplete="new-password" required />
+              <button id="toggle-signup-password-confirm" class="toggle-password-btn" type="button" aria-label="Mostrar senha"></button>
+            </div>
+            <span id="signup-confirm-error" class="field-error" aria-live="polite"></span>
+
+            <label class="lgpd-check">
+              <input id="signup-lgpd-accept" type="checkbox" />
+              <span>
+                Li e aceito os
+                <a id="terms-link" class="auth-doc-link" href="#" target="_blank" rel="noopener noreferrer">Termos de Uso</a>
+                e a
+                <a id="privacy-link" class="auth-doc-link" href="#" target="_blank" rel="noopener noreferrer">Política de Privacidade</a>.
+              </span>
+            </label>
+
+            <button id="signup-btn" class="auth-button" type="submit" disabled>
+              <span class="auth-submit-content"><span class="btn-text">Criar Conta</span></span>
+            </button>
+            <button id="back-to-login-from-signup" class="auth-secondary-btn" type="button">Voltar ao Login</button>
+            <div id="signup-status" class="form-status" aria-live="polite"></div>
+          </form>
+        </div>
+
+        <div id="forgot-view" class="auth-view hidden">
+          <form id="forgot-form" class="auth-form">
+            <label class="auth-label" for="forgot-email-id">E-mail institucional</label>
+            <div class="auth-input-wrap">
+              <input id="forgot-email-id" class="auth-input" type="text" placeholder="seunome" autocomplete="email" required />
+              <span class="domain-suffix">@tjpr.jus.br</span>
+            </div>
+            <span id="forgot-email-error" class="field-error" aria-live="polite"></span>
+
+            <button id="forgot-btn" class="auth-button" type="submit">
+              <span class="auth-submit-content"><span class="btn-text">Enviar link de redefinição</span></span>
+            </button>
+            <button id="back-to-login-from-forgot" class="auth-secondary-btn" type="button">Voltar ao Login</button>
+            <div id="forgot-status" class="form-status" aria-live="polite"></div>
+          </form>
+        </div>
+
+        <div id="signup-success-box" class="auth-success-box hidden"></div>
+        <p class="auth-note">Coletamos somente e-mail institucional e credenciais de autenticação para acesso ao sistema.</p>
       </div>
-      <p id="login-error" class="login-error" aria-live="polite"></p>
     </section>
 
     <section id="dashboard-section" class="popup-card hidden">
@@ -224,16 +257,12 @@
         <button id="open-quick-access" type="button">Consulta Rápida</button>
         <button id="open-dashboard" type="button">Abrir Dashboard</button>
         <button id="force-sync" type="button">Sincronizar</button>
-        <button id="toggle-password-form" type="button">Trocar Senha</button>
+        <button id="toggle-password-form" class="hidden" type="button">Trocar Senha</button>
         <button id="logout" type="button">Sair</button>
       </div>
-      <form id="password-form" class="password-form hidden">
-        <input type="password" id="new-password" placeholder="Nova senha (mín. 8 caracteres)" autocomplete="new-password" />
-        <input type="password" id="confirm-password" placeholder="Confirmar nova senha" autocomplete="new-password" />
-        <div class="password-actions">
-          <button id="save-password-btn" type="submit">Salvar senha</button>
-          <button id="cancel-password-btn" type="button">Cancelar</button>
-        </div>
+      <form id="password-form" class="hidden">
+        <input id="new-password" type="password" />
+        <input id="confirm-password" type="password" />
       </form>
       <p id="account-status" class="account-status" aria-live="polite"></p>
     </section>
@@ -250,6 +279,7 @@
     <script src="../shared/db.js"></script>
     <script src="../shared/api.js"></script>
     <script src="../shared/sync.js"></script>
+    <script src="../shared/auth-ui.js"></script>
     <script src="./popup.js"></script>
   </body>
 </html>
