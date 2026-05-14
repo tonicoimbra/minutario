@@ -6,6 +6,10 @@ const { JSDOM } = require("jsdom");
 
 const scriptPath = path.join(__dirname, "..", "content.js");
 const scriptSource = fs.readFileSync(scriptPath, "utf8");
+const wordClipboardSource = fs.readFileSync(
+  path.join(__dirname, "..", "shared", "word-clipboard.js"),
+  "utf8"
+);
 
 function bootstrapDom(html, options) {
   const dom = new JSDOM(
@@ -50,6 +54,7 @@ function bootstrapDom(html, options) {
     },
   };
 
+  window.eval(wordClipboardSource);
   window.eval(scriptSource);
   dom.localStorageArea = localStorageArea;
   return dom;
@@ -97,7 +102,7 @@ test("expands shortcut by replacing typed text with formatted HTML", () => {
   );
 
   assert.equal(expanded, true);
-  assert.match(editor.innerHTML, /<strong>Contrato pronto<\/strong>/);
+  assert.match(editor.innerHTML, /<strong(?:[^>]*)?>Contrato pronto<\/strong>/);
   assert.doesNotMatch(editor.textContent, /\/contrato/);
 });
 
@@ -180,13 +185,13 @@ test("uses rich clipboard paste data before falling back to DOM insertion", asyn
 
   assert.equal(expanded, true);
   assert.equal(clipboardWrites.length, 1);
-  assert.equal(
+  assert.match(
     pastedHtml,
-    "<p>Contrato <strong>pronto</strong> com <em>itálico</em></p>"
+    /<p[^>]*font-size:11pt[^>]*>Contrato <strong[^>]*font-weight:bold[^>]*>pronto<\/strong> com <em[^>]*font-style:italic[^>]*>itálico<\/em><\/p>/
   );
   assert.equal(pastedText, "Contrato pronto com itálico");
-  assert.match(editor.innerHTML, /<strong>pronto<\/strong>/);
-  assert.match(editor.innerHTML, /<em>itálico<\/em>/);
+  assert.match(editor.innerHTML, /<strong[^>]*font-weight:bold[^>]*>pronto<\/strong>/);
+  assert.match(editor.innerHTML, /<em[^>]*font-style:italic[^>]*>itálico<\/em>/);
   assert.doesNotMatch(editor.textContent, /\/contrato/);
 });
 
@@ -403,7 +408,7 @@ test("deletes typed shortcut before rich paste insertion", async () => {
 
   assert.equal(expanded, true);
   assert.equal(editor.textContent, "Caso formatado");
-  assert.match(editor.innerHTML, /<strong>Caso formatado<\/strong>/);
+  assert.match(editor.innerHTML, /<strong[^>]*font-weight:bold[^>]*>Caso formatado<\/strong>/);
   assert.doesNotMatch(editor.textContent, /\/caso01/);
 });
 
@@ -1448,7 +1453,7 @@ test("handles completion key synchronously when template is cached", () => {
 
   assert.equal(handled, true);
   assert.equal(prevented, true);
-  assert.match(editor.innerHTML, /<strong>Contrato pronto<\/strong>/);
+  assert.match(editor.innerHTML, /<strong(?:[^>]*)?>Contrato pronto<\/strong>/);
 });
 
 test("normalizes Quill-flavored HTML into a word-friendly subset", () => {
@@ -1471,10 +1476,10 @@ test("normalizes Quill-flavored HTML into a word-friendly subset", () => {
     ].join("")
   );
 
-  assert.equal(
-    normalized,
-    "<p>Primeira <strong>linha</strong></p><p>Segunda <em>linha</em><br><u>final</u></p><ul><li>item</li></ul>"
-  );
+  assert.match(normalized, /^<p[^>]*text-align:center[^>]*>/);
+  assert.match(normalized, /<span[^>]*font-size:18pt[^>]*>Primeira <strong[^>]*font-weight:bold[^>]*>linha<\/strong><\/span>/);
+  assert.match(normalized, /<em[^>]*font-style:italic[^>]*>linha<\/em><br><u[^>]*text-decoration:underline[^>]*>final<\/u>/);
+  assert.match(normalized, /<span[^>]*color:red[^>]*>item<\/span>/);
 });
 
 test("expands shortcut via direct DOM insertion when execCommand is unavailable", () => {
@@ -1496,7 +1501,7 @@ test("expands shortcut via direct DOM insertion when execCommand is unavailable"
   );
 
   assert.equal(expanded, true);
-  assert.equal(editor.innerHTML, "<strong>Contrato pronto</strong>");
+  assert.match(editor.innerHTML, /^<strong[^>]*font-weight:bold[^>]*>Contrato pronto<\/strong>$/);
   assert.doesNotMatch(editor.textContent, /\/contrato/);
 });
 
@@ -1517,9 +1522,9 @@ test("places caret at the exact end of inserted block content", () => {
   );
 
   assert.equal(expanded, true);
-  assert.equal(
+  assert.match(
     editor.innerHTML,
-    "<p>Primeira <strong>linha</strong></p><p>Segunda linha</p>"
+    /^<p[^>]*>Primeira <strong[^>]*font-weight:bold[^>]*>linha<\/strong><\/p><p[^>]*>Segunda linha<\/p>$/
   );
 
   const selection = getSelectionSnapshot(window);
@@ -1546,7 +1551,7 @@ test("places caret after trailing empty block content", () => {
   );
 
   assert.equal(expanded, true);
-  assert.equal(editor.innerHTML, "<p>Primeira linha</p><p><br></p>");
+  assert.match(editor.innerHTML, /^<p[^>]*>Primeira linha<\/p><p[^>]*><br><\/p>$/);
 
   const selection = window.getSelection();
   const trailingBlock = editor.lastChild;
@@ -1843,7 +1848,7 @@ test("loads templates from the background message channel", async () => {
 
   assert.equal(handled, true);
   assert.equal(prevented, true);
-  assert.match(editor.innerHTML, /<strong>Contrato pronto<\/strong>/);
+  assert.match(editor.innerHTML, /<strong(?:[^>]*)?>Contrato pronto<\/strong>/);
 });
 
 test("expands in the event target editor even when another contenteditable is active", async () => {
@@ -1954,7 +1959,7 @@ test("Gmail and Keep avoid synthetic paste and insert at the shortcut range", ()
   assert.equal(prevented, true);
   assert.equal(pasteDispatched, false);
   assert.equal(editor.textContent, "Texto no Gmail");
-  assert.match(editor.innerHTML, /<strong>Texto no Gmail<\/strong>/);
+  assert.match(editor.innerHTML, /<strong[^>]*font-weight:bold[^>]*>Texto no Gmail<\/strong>/);
 });
 
 test("collects Word-style editor diagnostics from replaced editable roots", () => {
@@ -2388,6 +2393,7 @@ test("Word pre-commit buffer displays the typed shortcut without committing it",
     },
   };
 
+  window.eval(wordClipboardSource);
   window.eval(scriptSource);
   await new Promise((resolve) => window.setTimeout(resolve, 80));
 
@@ -2794,6 +2800,6 @@ test("ignores benign extension context invalidation when loading templates and f
 
   assert.equal(handled, true);
   assert.equal(prevented, true);
-  assert.match(editor.innerHTML, /<strong>Contrato pronto<\/strong>/);
+  assert.match(editor.innerHTML, /<strong(?:[^>]*)?>Contrato pronto<\/strong>/);
   assert.equal(warnings.length, 0);
 });

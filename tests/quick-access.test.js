@@ -16,6 +16,10 @@ const scriptSource = fs.readFileSync(
   path.join(__dirname, "..", "quick-access", "quick-access.js"),
   "utf8"
 );
+const wordClipboardSource = fs.readFileSync(
+  path.join(__dirname, "..", "shared", "word-clipboard.js"),
+  "utf8"
+);
 
 async function bootstrapQuickAccess() {
   const dom = new JSDOM(htmlSource, {
@@ -92,6 +96,16 @@ async function bootstrapQuickAccess() {
   window.ClipboardItem = function ClipboardItem(items) {
     this.items = items;
   };
+  window.Blob = class TestBlob {
+    constructor(parts, options) {
+      this.parts = parts || [];
+      this.type = options && options.type ? options.type : "";
+    }
+
+    async text() {
+      return this.parts.map((part) => String(part)).join("");
+    }
+  };
 
   Object.defineProperty(window.navigator, "clipboard", {
     configurable: true,
@@ -106,6 +120,7 @@ async function bootstrapQuickAccess() {
   });
 
   window.eval(configSource);
+  window.eval(wordClipboardSource);
   window.eval(scriptSource);
   await new Promise((resolve) => window.setTimeout(resolve, 30));
 
@@ -146,9 +161,24 @@ test("quick access filters by search and folder chips", async () => {
 test("quick access copies selected template with rich clipboard payload", async () => {
   const { window, clipboardWrites } = await bootstrapQuickAccess();
 
+  window.document.getElementById("template-search").value = "/recurso";
+  window.document
+    .getElementById("template-search")
+    .dispatchEvent(new window.Event("input", { bubbles: true }));
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+
   window.document.getElementById("copy-template").click();
   await new Promise((resolve) => window.setTimeout(resolve, 0));
 
   assert.equal(clipboardWrites.length, 1);
   assert.ok(Array.isArray(clipboardWrites[0]));
+  const item = clipboardWrites[0][0];
+  const html = await item.items["text/html"].text();
+  const plain = await item.items["text/plain"].text();
+
+  assert.match(html, /xmlns:w="urn:schemas-microsoft-com:office:word"/);
+  assert.match(html, /<meta charset="utf-8">/);
+  assert.match(html, /<strong[^>]*font-weight:bold[^>]*>Recurso<\/strong>/);
+  assert.match(html, /font-size:11pt/);
+  assert.equal(plain, "Recurso pronto");
 });

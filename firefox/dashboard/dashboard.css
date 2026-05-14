@@ -742,6 +742,39 @@ body:has(.dashboard-grid) .ql-toolbar.ql-snow {
   background: #f8fafc;
 }
 
+body:has(.dashboard-grid) .ql-toolbar.ql-snow .ql-picker.ql-size {
+  width: 58px;
+}
+
+body:has(.dashboard-grid) .ql-toolbar.ql-snow .ql-picker.ql-size .ql-picker-label::before,
+body:has(.dashboard-grid) .ql-toolbar.ql-snow .ql-picker.ql-size .ql-picker-item::before {
+  content: attr(data-value);
+}
+
+body:has(.dashboard-grid) .ql-font-size-manual-group {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 0;
+}
+
+body:has(.dashboard-grid) .ql-font-size-manual {
+  width: 52px;
+  height: 24px;
+  border: 1px solid var(--tjpr-gray-200);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--tjpr-gray-900);
+  font: 12px/1.2 inherit;
+  padding: 2px 4px;
+}
+
+body:has(.dashboard-grid) .ql-font-size-suffix {
+  color: var(--tjpr-gray-500);
+  font-size: 12px;
+  line-height: 24px;
+}
+
 body:has(.dashboard-grid) .ql-container.ql-snow {
   border-color: var(--tjpr-gray-200);
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);

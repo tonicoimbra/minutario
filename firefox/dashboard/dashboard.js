@@ -11,6 +11,23 @@
   var allFolders = [];
   var activeFolderId = null;
   var quill = null;
+  var FONT_SIZE_VALUES = (window.MinutarioRichClipboard && window.MinutarioRichClipboard.FONT_SIZE_VALUES) || [
+    "8pt",
+    "9pt",
+    "10pt",
+    "11pt",
+    "12pt",
+    "14pt",
+    "16pt",
+    "18pt",
+    "20pt",
+    "24pt",
+    "28pt",
+    "32pt",
+    "36pt",
+    "48pt",
+    "72pt",
+  ];
 
   // DOM cache
   var els = {};
@@ -59,10 +76,38 @@
   }
 
   function stripHtml(html) {
+    if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.stripHtml) {
+      return window.MinutarioRichClipboard.stripHtml(html);
+    }
     if (!html) return "";
     var tmp = document.createElement("div");
     tmp.innerHTML = html;
     return tmp.textContent || tmp.innerText || "";
+  }
+
+  function getWordClipboardHtml(html) {
+    if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.buildOfficeHtml) {
+      return window.MinutarioRichClipboard.buildOfficeHtml(html, document);
+    }
+
+    return [
+      '<html xmlns:o="urn:schemas-microsoft-com:office:office"',
+      ' xmlns:w="urn:schemas-microsoft-com:office:word"',
+      ' xmlns="http://www.w3.org/TR/REC-html40">',
+      '<head><meta charset="utf-8"></head><body>',
+      html || "",
+      "</body></html>",
+    ].join("");
+  }
+
+  function normalizeFontSize(value) {
+    if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.normalizeFontSize) {
+      return window.MinutarioRichClipboard.normalizeFontSize(value);
+    }
+
+    var match = String(value || "").trim().match(/^(\d+(?:[.,]\d+)?)\s*(pt)?$/i);
+    if (!match) return "";
+    return match[1].replace(",", ".") + "pt";
   }
 
   function showToast(message) {
@@ -727,19 +772,23 @@ function getUserIdFromUser(user) {
       plainText = stripHtml(htmlContent);
     }
 
-    var textToCopy = plainText || htmlContent || "";
-
     try {
-      if (navigator.clipboard && navigator.clipboard.write && htmlContent) {
-        var blobHtml = new Blob([htmlContent], { type: "text/html" });
-        var blobText = new Blob([plainText || htmlContent], { type: "text/plain" });
-        var item = new ClipboardItem({
-          "text/html": blobHtml,
-          "text/plain": blobText
+      if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.copyRichText && htmlContent) {
+        await window.MinutarioRichClipboard.copyRichText(htmlContent, plainText || stripHtml(htmlContent), {
+          document: document,
+          navigator: navigator,
+          ClipboardItem: window.ClipboardItem,
+          Blob: window.Blob,
         });
-        await navigator.clipboard.write([item]);
-      } else if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(textToCopy);
+      } else if (navigator.clipboard && navigator.clipboard.write && htmlContent && typeof ClipboardItem !== "undefined") {
+        var blobHtml = new Blob([getWordClipboardHtml(htmlContent)], { type: "text/html" });
+        var blobText = new Blob([plainText || stripHtml(htmlContent)], { type: "text/plain" });
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": blobHtml,
+            "text/plain": blobText
+          })
+        ]);
       } else {
         throw new Error("Clipboard não suportado");
       }
@@ -792,19 +841,172 @@ function getUserIdFromUser(user) {
   }
 
   // Editor logic
+  function registerFontSizeAttributor() {
+    if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.registerQuillFontSize) {
+      window.MinutarioRichClipboard.registerQuillFontSize(window.Quill);
+    }
+  }
+
+  function getEditorToolbarElement() {
+    if (!els.quillEditor || !els.quillEditor.parentNode) {
+      return null;
+    }
+
+    return els.quillEditor.parentNode.querySelector(".ql-toolbar");
+  }
+
+  function ensureSizeSelectOption(select, value) {
+    var exists = false;
+
+    if (!select || !value) {
+      return;
+    }
+
+    Array.prototype.forEach.call(select.options || [], function(option) {
+      if (option.value === value) {
+        exists = true;
+      }
+    });
+
+    if (!exists) {
+      var option = document.createElement("option");
+      option.value = value;
+      option.textContent = value.replace(/pt$/, "");
+      select.appendChild(option);
+    }
+  }
+
+  function applyFontSize(value) {
+    var normalized = normalizeFontSize(value);
+    var range;
+
+    if (!quill || !normalized) {
+      return;
+    }
+
+    if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.ensureQuillFontSizeValue) {
+      window.MinutarioRichClipboard.ensureQuillFontSizeValue(window.Quill, normalized);
+    }
+
+    range = quill.getSelection ? quill.getSelection(true) : null;
+    if (range && typeof quill.formatText === "function" && range.length > 0) {
+      quill.formatText(range.index, range.length, "size", normalized, "user");
+      if (typeof quill.setSelection === "function") {
+        quill.setSelection(range.index, range.length, "silent");
+      }
+    } else if (typeof quill.format === "function") {
+      quill.format("size", normalized, "user");
+    }
+
+    updateFontSizeToolbar();
+  }
+
+  function updateFontSizeToolbar() {
+    var toolbar = getEditorToolbarElement();
+    var select = toolbar ? toolbar.querySelector("select.ql-size") : null;
+    var manualInput = toolbar ? toolbar.querySelector(".ql-font-size-manual") : null;
+    var range = quill && quill.getSelection ? quill.getSelection() : null;
+    var format = {};
+    var size = "";
+
+    if (!toolbar || !quill || !quill.getFormat) {
+      return;
+    }
+
+    if (range) {
+      format = quill.getFormat(range.index, range.length);
+    } else {
+      format = quill.getFormat();
+    }
+
+    size = normalizeFontSize(format && format.size ? format.size : "");
+
+    if (select) {
+      ensureSizeSelectOption(select, size);
+      select.value = size || "";
+    }
+
+    if (manualInput) {
+      manualInput.value = size ? size.replace(/pt$/, "") : "";
+    }
+  }
+
+  function setupFontSizeToolbar() {
+    var toolbar = getEditorToolbarElement();
+    var select = toolbar ? toolbar.querySelector("select.ql-size") : null;
+    var group;
+    var input;
+    var suffix;
+
+    if (!toolbar || toolbar.querySelector(".ql-font-size-manual")) {
+      return;
+    }
+
+    if (select) {
+      Array.prototype.forEach.call(select.options || [], function(option) {
+        option.textContent = option.value ? option.value.replace(/pt$/, "") : "Padrao";
+      });
+      select.setAttribute("aria-label", "Tamanho da fonte");
+      select.addEventListener("change", function(event) {
+        if (event.target.value) {
+          applyFontSize(event.target.value);
+        }
+      });
+    }
+
+    group = document.createElement("span");
+    group.className = "ql-formats ql-font-size-manual-group";
+
+    input = document.createElement("input");
+    input.type = "number";
+    input.min = "1";
+    input.max = "200";
+    input.step = "1";
+    input.inputMode = "decimal";
+    input.className = "ql-font-size-manual";
+    input.setAttribute("aria-label", "Tamanho da fonte em pontos");
+    input.addEventListener("change", function() {
+      applyFontSize(input.value + "pt");
+    });
+    input.addEventListener("keydown", function(event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyFontSize(input.value + "pt");
+      }
+    });
+
+    suffix = document.createElement("span");
+    suffix.className = "ql-font-size-suffix";
+    suffix.textContent = "pt";
+
+    group.appendChild(input);
+    group.appendChild(suffix);
+    toolbar.appendChild(group);
+
+    if (quill && typeof quill.on === "function") {
+      quill.on("selection-change", updateFontSizeToolbar);
+      quill.on("editor-change", updateFontSizeToolbar);
+    }
+
+    updateFontSizeToolbar();
+  }
+
   function initEditor() {
     if (!els.quillEditor) return;
+    registerFontSizeAttributor();
     quill = new Quill('#quill-editor', {
       theme: 'snow',
       modules: {
         toolbar: [
           [{ 'header': [1, 2, 3, false] }],
+          [{ 'size': FONT_SIZE_VALUES }],
           ['bold', 'italic', 'underline', 'strike'],
           [{ 'list': 'ordered'}, { 'list': 'bullet' }],
           ['clean']
         ]
       }
     });
+    setupFontSizeToolbar();
   }
 
   function handleNewTemplate() {

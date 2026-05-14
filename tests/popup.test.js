@@ -12,6 +12,10 @@ const popupSource = fs.readFileSync(
   path.join(__dirname, "..", "popup", "popup.js"),
   "utf8"
 );
+const wordClipboardSource = fs.readFileSync(
+  path.join(__dirname, "..", "shared", "word-clipboard.js"),
+  "utf8"
+);
 
 async function bootstrapPopup(options) {
   options = options || {};
@@ -112,6 +116,7 @@ async function bootstrapPopup(options) {
     },
   };
 
+  window.eval(wordClipboardSource);
   window.eval(popupSource);
   await new Promise((resolve) => window.setTimeout(resolve, 0));
 

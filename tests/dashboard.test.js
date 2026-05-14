@@ -20,6 +20,10 @@ const dashboardSource = fs.readFileSync(
   path.join(__dirname, "..", "dashboard", "dashboard.js"),
   "utf8"
 );
+const wordClipboardSource = fs.readFileSync(
+  path.join(__dirname, "..", "shared", "word-clipboard.js"),
+  "utf8"
+);
 const csvSource = fs.readFileSync(
   path.join(__dirname, "..", "dashboard", "sync", "csv.js"),
   "utf8"
@@ -295,6 +299,7 @@ function bootstrapDashboard(html, options) {
   window.confirm = () => true;
   window.prompt = () => "";
 
+  window.eval(wordClipboardSource);
   window.eval(csvSource);
   window.eval(dashboardSource);
   window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
@@ -339,14 +344,24 @@ test("CRUD dashboard loads shared storage and sync modules before dashboard logi
   var dbScriptIndex = dashboardHtml.indexOf("../shared/db.js");
   var apiScriptIndex = dashboardHtml.indexOf("../shared/api.js");
   var syncScriptIndex = dashboardHtml.indexOf("../shared/sync.js");
+  var wordClipboardScriptIndex = dashboardHtml.indexOf("../shared/word-clipboard.js");
   var dashboardScriptIndex = dashboardHtml.indexOf("dashboard.js");
 
   assert.ok(dbScriptIndex !== -1);
   assert.ok(apiScriptIndex !== -1);
   assert.ok(syncScriptIndex !== -1);
+  assert.ok(wordClipboardScriptIndex !== -1);
+  assert.ok(wordClipboardScriptIndex < dashboardScriptIndex);
   assert.ok(dbScriptIndex < dashboardScriptIndex);
   assert.ok(apiScriptIndex < dashboardScriptIndex);
   assert.ok(syncScriptIndex < dashboardScriptIndex);
+});
+
+test("CRUD dashboard exposes a point-based font size control for Quill", () => {
+  assert.match(dashboardSource, /registerQuillFontSize/);
+  assert.match(dashboardSource, /'size': FONT_SIZE_VALUES/);
+  assert.match(dashboardSource, /ql-font-size-manual/);
+  assert.match(dashboardCss, /\.ql-font-size-manual/);
 });
 
 test("committed PWA dashboard layout renders templates without injected elements", async () => {

@@ -282,11 +282,21 @@
   }
 
   async function writeRichClipboard(html, plainText) {
-    if (!navigator.clipboard) {
-      throw new Error("Clipboard API indisponível");
+    if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.copyRichText) {
+      var result = await window.MinutarioRichClipboard.copyRichText(html, plainText, {
+        document: document,
+        navigator: navigator,
+        ClipboardItem: window.ClipboardItem,
+        Blob: window.Blob,
+      });
+      return result.mode;
     }
 
-    if (typeof navigator.clipboard.write === "function" && typeof ClipboardItem !== "undefined") {
+    if (
+      navigator.clipboard &&
+      typeof navigator.clipboard.write === "function" &&
+      typeof ClipboardItem !== "undefined"
+    ) {
       var htmlBlob = new Blob([html], { type: "text/html" });
       var textBlob = new Blob([plainText], { type: "text/plain" });
       await navigator.clipboard.write([
@@ -298,29 +308,7 @@
       return "rich";
     }
 
-    if (typeof navigator.clipboard.writeText === "function") {
-      await navigator.clipboard.writeText(plainText);
-      return "plain";
-    }
-
     throw new Error("Método de cópia não suportado");
-  }
-
-  function fallbackCopy(plainText) {
-    var textarea = document.createElement("textarea");
-    textarea.value = plainText;
-    textarea.setAttribute("readonly", "true");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
-    document.body.appendChild(textarea);
-    textarea.select();
-
-    try {
-      return document.execCommand("copy");
-    } finally {
-      textarea.remove();
-    }
   }
 
   async function copySelectedTemplate() {
@@ -332,19 +320,18 @@
     var plainText = stripHtml(template.content || "");
     try {
       var mode = await writeRichClipboard(template.content || "", plainText);
-      showToast(mode === "rich" ? "Minuta copiada com formatação." : "Minuta copiada em texto simples.", "success");
+      showToast(mode === "rich" || mode === "fallback" ? "Minuta copiada com formatação." : "Minuta copiada em texto simples.", "success");
     } catch (error) {
-      var copied = fallbackCopy(plainText);
-      if (copied) {
-        showToast("Permissão rica negada. Minuta copiada em texto simples.", "success");
-      } else {
-        showToast("Não foi possível copiar a minuta. Verifique a permissão da área de transferência.", "error");
-        return;
-      }
+      showToast("Não foi possível copiar a minuta. Verifique a permissão da área de transferência.", "error");
+      return;
     }
   }
 
   function stripHtml(html) {
+    if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.stripHtml) {
+      return window.MinutarioRichClipboard.stripHtml(html);
+    }
+
     var container = document.createElement("div");
     container.innerHTML = html || "";
     return container.textContent || container.innerText || "";

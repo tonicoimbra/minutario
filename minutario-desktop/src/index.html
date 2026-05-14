@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minutário</title>
+  <link rel="stylesheet" href="lib/quill.snow.css">
+  <link rel="stylesheet" href="assets/dashboard.css">
+  <style>
+    .login-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #1a1a2e;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .login-screen .login-box {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 40px 32px;
+      width: 360px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.3);
+    }
+    .login-screen .login-brand {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .login-screen .login-brand .mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      background: #e94560;
+      border-radius: 14px;
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .login-screen .login-brand h1 { margin: 0; font-size: 24px; }
+    .login-screen .login-brand p { margin: 4px 0 0; color: #8892b0; font-size: 13px; }
+    .login-screen label { display: block; margin-bottom: 4px; font-size: 13px; color: #a8b2d1; }
+    .login-screen input[type="email"],
+    .login-screen input[type="password"] {
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+      border: 1px solid #233554;
+      border-radius: 8px;
+      background: #0f3460;
+      color: #fff;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    .login-screen input:focus { outline: none; border-color: #e94560; }
+    .login-screen .login-btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #e94560;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .login-screen .login-btn:hover { background: #c73652; }
+    .login-screen .login-error {
+      color: #ff6b6b;
+      font-size: 13px;
+      margin-top: 12px;
+      min-height: 18px;
+    }
+    .login-screen .login-hint {
+      color: #5a6a8a;
+      font-size: 12px;
+      text-align: center;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="login-screen" class="login-screen">
+    <div class="login-box">
+      <div class="login-brand">
+        <div class="mark">M</div>
+        <h1>Minutário</h1>
+        <p>Expansão de atalhos de texto</p>
+      </div>
+      <form id="login-form">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" placeholder="seu@email.com" required>
+        <label for="login-password">Senha</label>
+        <input type="password" id="login-password" placeholder="Sua senha" required>
+        <button type="submit" class="login-btn">Entrar</button>
+      </form>
+      <div id="login-error" class="login-error"></div>
+      <p class="login-hint">Use a mesma conta da extensão para acessar seus templates.</p>
+    </div>
+  </div>
+
+  <div id="dashboard-screen" class="hidden">
+    <header class="top-bar">
+      <div class="brand-wrap">
+        <div class="brand-mark" aria-hidden="true">M</div>
+        <div>
+          <h1 class="brand-title">Minutário</h1>
+          <p class="brand-subtitle">Expansão de atalhos de texto no desktop</p>
+        </div>
+      </div>
+      <button id="logout-btn" class="btn btn-secondary" type="button" style="margin-left:auto">Sair</button>
+    </header>
+
+    <section class="import-bar">
+      <div class="import-group">
+        <label class="btn btn-secondary import-label">
+          <input type="file" id="import-csv" accept=".csv" hidden>
+          📁 Importar CSV
+        </label>
+        <span id="import-status" class="import-status"></span>
+      </div>
+      <button id="export-csv" class="btn btn-secondary" type="button">💾 Exportar CSV</button>
+      <button id="supabase-sync" class="btn btn-secondary" type="button">Sincronizar</button>
+      <span id="sync-badge" class="sync-badge sync-idle">Sincronizado</span>
+    </section>
+
+    <main class="dashboard-grid">
+      <aside class="panel panel-folders">
+        <div class="panel-head">PASTAS</div>
+        <ul id="folder-list" class="folder-list"></ul>
+        <div class="folder-actions">
+          <button id="new-folder" class="btn btn-secondary" type="button">+ Nova Pasta</button>
+          <button id="rename-folder" class="btn btn-secondary" type="button" disabled>Renomear Pasta</button>
+          <button id="delete-folder" class="btn btn-danger btn-folder-delete" type="button" disabled>Excluir Pasta</button>
+        </div>
+      </aside>
+
+      <section class="panel panel-list">
+        <button id="new-template" class="btn btn-primary btn-new-template-list" type="button">+ Novo Template</button>
+        <div class="search-wrap">
+          <input id="search" type="search" placeholder="Buscar por nome ou atalho..." autocomplete="off">
+        </div>
+        <ul id="template-list" class="template-list"></ul>
+      </section>
+
+      <section class="panel panel-editor">
+        <form id="editor-form" class="editor-form">
+          <label for="tpl-name">Nome</label>
+          <input id="tpl-name" type="text" maxlength="120" required>
+
+          <label for="tpl-shortcut">Atalho</label>
+          <div class="shortcut-wrap">
+            <span class="shortcut-prefix">/</span>
+            <input id="tpl-shortcut" type="text" maxlength="30" placeholder="ex: contrato" autocomplete="off" required>
+          </div>
+          <span id="shortcut-error" class="shortcut-error" aria-live="polite"></span>
+
+          <label for="tpl-folder">Pasta</label>
+          <select id="tpl-folder"></select>
+
+          <label for="quill-editor">Conteúdo</label>
+          <div id="quill-editor"></div>
+
+          <div class="editor-actions">
+            <button id="save-template" class="btn btn-primary" type="submit">Salvar</button>
+            <button id="delete-template" class="btn btn-danger" type="button">Excluir</button>
+          </div>
+        </form>
+        <div id="toast" aria-live="polite" aria-atomic="true"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="lib/papaparse.min.js"></script>
+  <script src="lib/supabase.min.js"></script>
+  <script src="lib/quill.min.js"></script>
+  <script src="shared/browser-compat.js"></script>
+  <script src="shared/config.js"></script>
+  <script src="shared/word-clipboard.js"></script>
+  <script src="shared/db.js"></script>
+  <script src="shared/api.js"></script>
+  <script src="shared/sync.js"></script>
+  <script src="sync/csv.js"></script>
+  <script src="sync/supabase.js"></script>
+  <script src="sync/index.js"></script>
+  <script src="assets/dashboard.js" defer></script>
+</body>
+</html>

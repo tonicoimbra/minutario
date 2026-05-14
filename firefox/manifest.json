@@ -44,6 +44,7 @@
       "js": [
         "shared/browser-compat.js",
         "shared/config.js",
+        "shared/word-clipboard.js",
         "shared/db.js",
         "shared/api.js",
         "shared/sync.js",

@@ -485,12 +485,21 @@ async function copyTemplateById(id, button, initialTemplate) {
 
   var plain = stripHtml(template.content);
 
-  await navigator.clipboard.write([
-    new ClipboardItem({
-      "text/html": new Blob([template.content], { type: "text/html" }),
-      "text/plain": new Blob([plain], { type: "text/plain" }),
-    }),
-  ]);
+  if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.copyRichText) {
+    await window.MinutarioRichClipboard.copyRichText(template.content, plain, {
+      document: document,
+      navigator: navigator,
+      ClipboardItem: window.ClipboardItem,
+      Blob: window.Blob,
+    });
+  } else {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": new Blob([template.content], { type: "text/html" }),
+        "text/plain": new Blob([plain], { type: "text/plain" }),
+      }),
+    ]);
+  }
 
   var originalMarkup = button.innerHTML;
   button.textContent = "Copiado!";
@@ -501,6 +510,10 @@ async function copyTemplateById(id, button, initialTemplate) {
 }
 
 function stripHtml(html) {
+  if (window.MinutarioRichClipboard && window.MinutarioRichClipboard.stripHtml) {
+    return window.MinutarioRichClipboard.stripHtml(html);
+  }
+
   var parser = document.createElement("div");
   parser.innerHTML = html;
   return (parser.textContent || parser.innerText || "").trim();

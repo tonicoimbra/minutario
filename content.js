@@ -1390,6 +1390,13 @@
   }
 
   function normalizeTemplateHtml(doc, html) {
+    if (
+      global.MinutarioRichClipboard &&
+      typeof global.MinutarioRichClipboard.prepareHtmlFragment === "function"
+    ) {
+      return global.MinutarioRichClipboard.prepareHtmlFragment(html, doc);
+    }
+
     var template = doc.createElement("template");
     template.innerHTML = html || "";
 
@@ -1480,6 +1487,23 @@
     var navigatorRef = view.navigator || global.navigator;
     var ClipboardItemCtor = view.ClipboardItem || global.ClipboardItem;
     var BlobCtor = view.Blob || global.Blob;
+    var htmlForClipboard = html || "";
+
+    if (
+      global.MinutarioRichClipboard &&
+      typeof global.MinutarioRichClipboard.buildOfficeHtml === "function"
+    ) {
+      htmlForClipboard = global.MinutarioRichClipboard.buildOfficeHtml(htmlForClipboard, doc);
+    } else {
+      htmlForClipboard = [
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office"',
+        ' xmlns:w="urn:schemas-microsoft-com:office:word"',
+        ' xmlns="http://www.w3.org/TR/REC-html40">',
+        '<head><meta charset="utf-8"></head><body>',
+        htmlForClipboard,
+        "</body></html>",
+      ].join("");
+    }
 
     if (
       !navigatorRef ||
@@ -1494,8 +1518,8 @@
     try {
       await navigatorRef.clipboard.write([
         new ClipboardItemCtor({
-          "text/html": new BlobCtor([html || ""], { type: "text/html" }),
-          "text/plain": new BlobCtor([plainText || stripHtml(html)], {
+          "text/html": new BlobCtor([htmlForClipboard], { type: "text/html" }),
+          "text/plain": new BlobCtor([plainText || stripHtml(htmlForClipboard)], {
             type: "text/plain",
           }),
         }),
