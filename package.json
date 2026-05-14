@@ -8,13 +8,19 @@
     "check": "node --check background.js content.js popup/popup.js shared/api.js shared/sync.js shared/browser-compat.js shared/word-clipboard.js dashboard/dashboard.js dashboard/sync/supabase.js password-reset/password-reset.js firefox/background.js",
     "pack:chrome": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-chrome.ps1",
     "pack:firefox": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-firefox.ps1",
+    "pack:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-desktop.ps1",
+    "pack:extensions": "npm run pack:chrome && npm run pack:firefox",
+    "pack:all": "npm run pack:chrome && npm run pack:firefox && npm run pack:desktop",
     "sign:firefox": "npm run pack:firefox && npx web-ext sign --source-dir dist/firefox/minutario-firefox --artifacts-dir dist/firefox --api-key %AMO_JWT_ISSUER% --api-secret %AMO_JWT_SECRET%",
     "version:bump:patch": "node scripts/bump-version.js patch",
     "version:bump:minor": "node scripts/bump-version.js minor",
     "version:bump:major": "node scripts/bump-version.js major",
     "release:pilot": "npm run test && npm run check && npm run pack:chrome && npm run pack:firefox",
     "release:pilot:full:patch": "npm run version:bump:patch && npm run release:pilot",
-    "release:pilot:full:minor": "npm run version:bump:minor && npm run release:pilot"
+    "release:pilot:full:minor": "npm run version:bump:minor && npm run release:pilot",
+    "release:all": "npm run test && npm run check && npm run pack:all",
+    "release:all:patch": "npm run version:bump:patch && npm run release:all",
+    "release:all:minor": "npm run version:bump:minor && npm run release:all"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",

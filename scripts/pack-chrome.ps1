@@ -27,7 +27,8 @@ $itemsToPack = @(
   "popup",
   "quick-access",
   "dashboard",
-  "shared"
+  "shared",
+  "password-reset"
 )
 
 foreach ($item in $itemsToPack) {

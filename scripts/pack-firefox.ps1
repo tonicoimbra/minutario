@@ -18,23 +18,35 @@ if (Test-Path $stageDir) {
 }
 New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
 
-$itemsToPack = @(
-  "content.js",
+$sharedItems = @(
   "icons",
   "lib",
-  "popup",
   "quick-access",
   "dashboard",
   "shared",
   "password-reset"
 )
 
-foreach ($item in $itemsToPack) {
+foreach ($item in $sharedItems) {
   Copy-Item -Path $item -Destination $stageDir -Recurse -Force
 }
 
 Copy-Item -Path "firefox\manifest.json" -Destination (Join-Path $stageDir "manifest.json") -Force
 Copy-Item -Path "firefox\background.js" -Destination (Join-Path $stageDir "background.js") -Force
+Copy-Item -Path "firefox\content.js"    -Destination (Join-Path $stageDir "content.js")    -Force
+Copy-Item -Path "firefox\popup"         -Destination (Join-Path $stageDir "popup")         -Recurse -Force
+
+$firefoxSharedOverrides = @(
+  "api.js", "auth-ui.js", "auth-ui.css", "browser-compat.js",
+  "db.js", "sync.js", "word-clipboard.js",
+  "confirmed.html", "privacy.html", "terms.html"
+)
+foreach ($f in $firefoxSharedOverrides) {
+  $src = Join-Path "firefox\shared" $f
+  if (Test-Path $src) {
+    Copy-Item -Path $src -Destination (Join-Path $stageDir "shared\$f") -Force
+  }
+}
 
 if (Test-Path "firefox\shared\config.js") {
   Copy-Item -Path "firefox\shared\config.js" -Destination (Join-Path $stageDir "shared\config.js") -Force

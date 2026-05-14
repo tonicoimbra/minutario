@@ -9,53 +9,50 @@ function fail(message) {
 function parseSemver(version) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) return null;
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-  };
+  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
 }
 
-function bump(versionObj, kind) {
-  if (kind === "patch") {
-    return { major: versionObj.major, minor: versionObj.minor, patch: versionObj.patch + 1 };
-  }
-  if (kind === "minor") {
-    return { major: versionObj.major, minor: versionObj.minor + 1, patch: 0 };
-  }
-  if (kind === "major") {
-    return { major: versionObj.major + 1, minor: 0, patch: 0 };
-  }
+function bump(v, kind) {
+  if (kind === "patch") return { major: v.major, minor: v.minor, patch: v.patch + 1 };
+  if (kind === "minor") return { major: v.major, minor: v.minor + 1, patch: 0 };
+  if (kind === "major") return { major: v.major + 1, minor: 0, patch: 0 };
   fail("Tipo inválido. Use: patch | minor | major");
+}
+
+function updateJsonVersion(filePath, newVersion, versionPath) {
+  const raw = fs.readFileSync(filePath, "utf8");
+  const obj = JSON.parse(raw);
+  let target = obj;
+  const parts = versionPath.split(".");
+  for (let i = 0; i < parts.length - 1; i++) target = target[parts[i]];
+  target[parts[parts.length - 1]] = newVersion;
+  fs.writeFileSync(filePath, JSON.stringify(obj, null, 2) + "\n", "utf8");
+  console.log(`  ${filePath}`);
 }
 
 function main() {
   const kind = (process.argv[2] || "patch").toLowerCase();
-  const manifestPath = path.join(process.cwd(), "manifest.json");
+  const root = process.cwd();
 
-  if (!fs.existsSync(manifestPath)) {
-    fail("manifest.json não encontrado.");
-  }
+  const chromePath = path.join(root, "manifest.json");
+  if (!fs.existsSync(chromePath)) fail("manifest.json não encontrado.");
 
-  const raw = fs.readFileSync(manifestPath, "utf8");
-  let manifest;
-  try {
-    manifest = JSON.parse(raw);
-  } catch (err) {
-    fail("manifest.json inválido.");
-  }
-
-  const current = parseSemver(String(manifest.version || ""));
-  if (!current) {
-    fail("Versão atual inválida no manifest.json. Esperado formato x.y.z");
-  }
+  const current = parseSemver(String(JSON.parse(fs.readFileSync(chromePath, "utf8")).version || ""));
+  if (!current) fail("Versão atual inválida em manifest.json. Esperado formato x.y.z");
 
   const next = bump(current, kind);
   const nextVersion = `${next.major}.${next.minor}.${next.patch}`;
-  manifest.version = nextVersion;
+  const prev = `${current.major}.${current.minor}.${current.patch}`;
 
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  console.log(`Versão atualizada: ${current.major}.${current.minor}.${current.patch} -> ${nextVersion}`);
+  console.log(`Versão: ${prev} → ${nextVersion}`);
+
+  updateJsonVersion(chromePath, nextVersion, "version");
+
+  const firefoxPath = path.join(root, "firefox", "manifest.json");
+  if (fs.existsSync(firefoxPath)) updateJsonVersion(firefoxPath, nextVersion, "version");
+
+  const tauriPath = path.join(root, "minutario-desktop", "src-tauri", "tauri.conf.json");
+  if (fs.existsSync(tauriPath)) updateJsonVersion(tauriPath, nextVersion, "version");
 }
 
 main();
