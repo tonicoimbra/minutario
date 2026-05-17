@@ -45,7 +45,8 @@ if ($installers.Count -eq 0) {
 
 foreach ($installer in $installers) {
   $ext  = $installer.Extension.ToLower().TrimStart(".")
-  $dest = Join-Path $distDest ("minutario-desktop-v{0}-{1}.{2}" -f $version, $ext, $ext)
+  $suffix = if ($ext -eq "exe") { "setup" } else { $ext }
+  $dest = Join-Path $distDest ("minutario-desktop-v{0}-{1}.{2}" -f $version, $suffix, $ext)
   Copy-Item -LiteralPath $installer.FullName -Destination $dest -Force
   Write-Host "Copiado: $dest" -ForegroundColor Green
 }

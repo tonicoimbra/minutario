@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use windows::Win32::Foundation::*;
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -21,6 +21,7 @@ struct HookState {
     trigger_char: char,
     trigger_key_vks: Vec<u8>,
     db_conn: Arc<Mutex<Connection>>,
+    own_pid: u32,
 }
 
 #[derive(Default)]
@@ -33,6 +34,21 @@ static HOOK_RUNTIME: OnceLock<Mutex<HookRuntime>> = OnceLock::new();
 
 fn runtime() -> &'static Mutex<HookRuntime> {
     HOOK_RUNTIME.get_or_init(|| Mutex::new(HookRuntime::default()))
+}
+
+/// Check if the foreground window belongs to our own process.
+/// When true, we skip hook processing so typing inside the
+/// Minutário dashboard works normally.
+fn is_own_window_focused(own_pid: u32) -> bool {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.is_invalid() || fg.0.is_null() {
+            return false;
+        }
+        let mut fg_pid: u32 = 0;
+        GetWindowThreadProcessId(fg, Some(&mut fg_pid));
+        fg_pid == own_pid
+    }
 }
 
 unsafe extern "system" fn low_level_keyboard_proc(
@@ -56,6 +72,10 @@ unsafe extern "system" fn low_level_keyboard_proc(
         let mut runtime = runtime_lock.lock().unwrap();
 
         if let Some(state) = runtime.state.as_mut() {
+            // Skip hook processing when typing inside our own window
+            if is_own_window_focused(state.own_pid) {
+                return CallNextHookEx(None, n_code, w_param, l_param);
+            }
 
             if vk == VK_BACK.0 as u32 {
                 if !state.buffer.is_empty() {
@@ -162,7 +182,9 @@ fn vk_to_char(vk: u32, scan_code: u32) -> Option<char> {
         }
 
         let mut buffer = [0u16; 8];
-        let result = ToUnicode(vk, scan_code, Some(&keyboard_state), &mut buffer, 0);
+        // Use flag 0x4 (do not change keyboard state) to avoid
+        // consuming dead keys and corrupting the translation state
+        let result = ToUnicode(vk, scan_code, Some(&keyboard_state), &mut buffer, 0x4);
 
         if result > 0 {
             return char::from_u32(buffer[0] as u32).map(|c| c.to_ascii_lowercase());
@@ -187,6 +209,8 @@ pub fn start_hook(db_conn: Arc<Mutex<Connection>>, trigger_char: char, trigger_k
         return;
     }
 
+    let own_pid = unsafe { GetCurrentProcessId() };
+
     {
         let mut runtime = runtime().lock().unwrap();
         runtime.state = Some(HookState {
@@ -194,6 +218,7 @@ pub fn start_hook(db_conn: Arc<Mutex<Connection>>, trigger_char: char, trigger_k
             trigger_char,
             trigger_key_vks,
             db_conn: db_conn.clone(),
+            own_pid,
         });
         runtime.thread_id = None;
     }
@@ -248,3 +273,4 @@ pub fn stop_hook() {
 pub fn is_hook_active() -> bool {
     HOOK_ACTIVE.load(Ordering::Relaxed)
 }
+

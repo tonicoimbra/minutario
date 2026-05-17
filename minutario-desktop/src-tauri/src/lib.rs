@@ -21,6 +21,11 @@ pub struct DeepLinkState {
     pending_url: Arc<Mutex<Option<String>>>,
 }
 
+pub struct HookControlState {
+    enabled_by_user: Arc<Mutex<bool>>,
+    paused_for_focus: Arc<Mutex<bool>>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct AuthSessionPayload {
     access_token: String,
@@ -31,6 +36,28 @@ fn extract_deep_link_from_args(args: &[String]) -> Option<String> {
     args.iter()
         .find(|arg| arg.starts_with("tauri://localhost/"))
         .cloned()
+}
+
+fn configure_portable_webview2_runtime() {
+    let exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+
+    let exe_dir = match exe_path.parent() {
+        Some(path) => path,
+        None => return,
+    };
+
+    let fixed_runtime_dir = exe_dir.join("webview2-fixed");
+    let runtime_exe = fixed_runtime_dir.join("msedgewebview2.exe");
+
+    if runtime_exe.exists() {
+        std::env::set_var(
+            "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
+            fixed_runtime_dir.as_os_str(),
+        );
+    }
 }
 
 #[tauri::command]
@@ -131,24 +158,49 @@ fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+fn resolve_trigger_char(db_conn: &Arc<Mutex<rusqlite::Connection>>) -> char {
+    let conn = match db_conn.lock() {
+        Ok(conn) => conn,
+        Err(_) => return '/',
+    };
+
+    let tc = db::sqlite::get_setting(&conn, "triggerChar")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "/".to_string());
+    tc.chars().next().unwrap_or('/')
+}
+
+fn start_keyboard_hook(db_conn: Arc<Mutex<rusqlite::Connection>>) {
+    let trigger_char = resolve_trigger_char(&db_conn);
+    keyboard::start_hook(db_conn, trigger_char, vec![0x20]); // VK_SPACE
+}
+
 #[tauri::command]
-fn toggle_hook(enabled: bool, db_state: State<AppDb>) -> Result<bool, String> {
+fn toggle_hook(
+    enabled: bool,
+    db_state: State<AppDb>,
+    hook_control: State<HookControlState>,
+) -> Result<bool, String> {
     if enabled {
+        if let Ok(mut desired) = hook_control.enabled_by_user.lock() {
+            *desired = true;
+        }
+        if let Ok(mut paused) = hook_control.paused_for_focus.lock() {
+            *paused = false;
+        }
         if keyboard::is_hook_active() {
             return Ok(true);
         }
-        let trigger_char = {
-            let conn = db_state.conn.lock().map_err(|e| e.to_string())?;
-            let tc = db::sqlite::get_setting(&conn, "triggerChar")
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "/".to_string());
-            tc.chars().next().unwrap_or('/')
-        };
-        let trigger_key_vks = vec![0x20]; // VK_SPACE
-        keyboard::start_hook(db_state.conn.clone(), trigger_char, trigger_key_vks);
+        start_keyboard_hook(db_state.conn.clone());
         Ok(true)
     } else {
+        if let Ok(mut desired) = hook_control.enabled_by_user.lock() {
+            *desired = false;
+        }
+        if let Ok(mut paused) = hook_control.paused_for_focus.lock() {
+            *paused = false;
+        }
         keyboard::stop_hook();
         Ok(false)
     }
@@ -293,6 +345,8 @@ fn consume_pending_deep_link(state: State<DeepLinkState>) -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    configure_portable_webview2_runtime();
+
     let initial_args: Vec<String> = std::env::args().collect();
     let initial_deep_link = extract_deep_link_from_args(&initial_args);
 
@@ -319,6 +373,10 @@ pub fn run() {
             app.manage(DeepLinkState {
                 pending_url: Arc::new(Mutex::new(initial_deep_link.clone())),
             });
+            app.manage(HookControlState {
+                enabled_by_user: Arc::new(Mutex::new(true)),
+                paused_for_focus: Arc::new(Mutex::new(false)),
+            });
 
             let open_item = MenuItem::with_id(app, "open", "Abrir Minutário", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
@@ -339,26 +397,25 @@ pub fn run() {
                             }
                         }
                         "toggle" => {
+                            let hook_control = app.state::<HookControlState>();
                             let active = keyboard::is_hook_active();
                             if active {
+                                if let Ok(mut desired) = hook_control.enabled_by_user.lock() {
+                                    *desired = false;
+                                }
+                                if let Ok(mut paused) = hook_control.paused_for_focus.lock() {
+                                    *paused = false;
+                                }
                                 keyboard::stop_hook();
                             } else {
+                                if let Ok(mut desired) = hook_control.enabled_by_user.lock() {
+                                    *desired = true;
+                                }
+                                if let Ok(mut paused) = hook_control.paused_for_focus.lock() {
+                                    *paused = false;
+                                }
                                 let db_state = app.state::<AppDb>();
-                                let trigger_char = {
-                                    let conn = db_state.conn.lock().unwrap();
-                                    db::sqlite::get_setting(&conn, "triggerChar")
-                                        .ok()
-                                        .flatten()
-                                        .unwrap_or_else(|| "/".to_string())
-                                        .chars()
-                                        .next()
-                                        .unwrap_or('/')
-                                };
-                                keyboard::start_hook(
-                                    db_state.conn.clone(),
-                                    trigger_char,
-                                    vec![0x20],
-                                );
+                                start_keyboard_hook(db_state.conn.clone());
                             }
                             if let Some(_tray) = app.tray_by_id("main") {
                                 let _tooltip = if !active { "Minutário — Expansão ativa" } else { "Minutário — Expansão desativada" };
@@ -373,7 +430,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            keyboard::start_hook(conn, '/', vec![0x20]);
+            start_keyboard_hook(conn);
 
             Ok(())
         })
@@ -400,6 +457,40 @@ pub fn run() {
             consume_pending_deep_link,
         ])
         .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let WindowEvent::Focused(focused) = event {
+                    let app = window.app_handle();
+                    let hook_control = app.state::<HookControlState>();
+                    let desired_enabled = hook_control
+                        .enabled_by_user
+                        .lock()
+                        .map(|v| *v)
+                        .unwrap_or(true);
+
+                    if *focused {
+                        if desired_enabled && keyboard::is_hook_active() {
+                            if let Ok(mut paused) = hook_control.paused_for_focus.lock() {
+                                *paused = true;
+                            }
+                            keyboard::stop_hook();
+                        }
+                    } else if desired_enabled {
+                        let paused_for_focus = hook_control
+                            .paused_for_focus
+                            .lock()
+                            .map(|v| *v)
+                            .unwrap_or(false);
+                        if paused_for_focus && !keyboard::is_hook_active() {
+                            if let Ok(mut paused) = hook_control.paused_for_focus.lock() {
+                                *paused = false;
+                            }
+                            let db_state = app.state::<AppDb>();
+                            start_keyboard_hook(db_state.conn.clone());
+                        }
+                    }
+                }
+            }
+
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();

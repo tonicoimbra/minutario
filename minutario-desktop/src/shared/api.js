@@ -116,17 +116,10 @@
     }
 
     var sessionArea = getExtensionStorageSession();
-    var savedInSessionArea = await storageSet(sessionArea, {
+    await storageSet(sessionArea, {
       [AUTH_ACCESS_TOKEN_KEY]: session.access_token,
       [AUTH_REFRESH_TOKEN_KEY]: session.refresh_token,
     });
-
-    if (!savedInSessionArea) {
-      await storageSet(getExtensionStorageLocal(), {
-        [AUTH_ACCESS_TOKEN_KEY]: session.access_token,
-        [AUTH_REFRESH_TOKEN_KEY]: session.refresh_token,
-      });
-    }
 
     clearLegacyLocalToken(AUTH_ACCESS_TOKEN_KEY);
     clearLegacyLocalToken(AUTH_REFRESH_TOKEN_KEY);
@@ -176,14 +169,6 @@
     }
 
     stored = await storageGet(getExtensionStorageSession(), [AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
-    accessToken = stored && stored[AUTH_ACCESS_TOKEN_KEY];
-    refreshToken = stored && stored[AUTH_REFRESH_TOKEN_KEY];
-    if (accessToken && refreshToken) {
-      memorySession = { access_token: accessToken, refresh_token: refreshToken };
-      return memorySession;
-    }
-
-    stored = await storageGet(getExtensionStorageLocal(), [AUTH_ACCESS_TOKEN_KEY, AUTH_REFRESH_TOKEN_KEY]);
     accessToken = stored && stored[AUTH_ACCESS_TOKEN_KEY];
     refreshToken = stored && stored[AUTH_REFRESH_TOKEN_KEY];
     if (accessToken && refreshToken) {

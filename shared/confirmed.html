@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Conta confirmada - Minutário</title>
+    <title>Confirmação de e-mail - Minutário</title>
     <style>
       body {
         margin: 0;
@@ -29,19 +29,58 @@
         color: #065f46;
       }
 
+      h1.error {
+        color: #b91c1c;
+      }
+
       p {
         margin: 0;
         line-height: 1.6;
+      }
+
+      .hint {
+        margin-top: 12px;
+        font-size: 14px;
+        color: #475569;
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>Conta confirmada com sucesso</h1>
-      <p>
-        Seu e-mail foi validado. Volte para o Minutário e faça login normalmente para acessar suas
-        minutas.
-      </p>
+      <h1 id="title">Conta confirmada com sucesso</h1>
+      <p id="message">Seu e-mail foi validado. Volte para o Minutário e faça login normalmente para acessar suas minutas.</p>
+      <p class="hint">Se esta página indicar erro, retorne ao login e solicite novo e-mail de confirmação.</p>
     </main>
+    <script>
+      (function () {
+        var titleEl = document.getElementById("title");
+        var messageEl = document.getElementById("message");
+        var url = new URL(window.location.href);
+        var hash = window.location.hash || "";
+        var queryError = url.searchParams.get("error") || url.searchParams.get("error_code");
+        var hashError = "";
+        if (hash.indexOf("error=") !== -1 || hash.indexOf("error_code=") !== -1) {
+          try {
+            var params = new URLSearchParams(hash.replace(/^#/, ""));
+            hashError = params.get("error") || params.get("error_code") || "";
+          } catch (err) {
+            hashError = "";
+          }
+        }
+
+        var errorCode = String(queryError || hashError || "").toLowerCase();
+        if (!errorCode) return;
+
+        if (titleEl) titleEl.classList.add("error");
+        if (errorCode.indexOf("expired") !== -1 || errorCode.indexOf("otp_expired") !== -1) {
+          if (titleEl) titleEl.textContent = "Link expirado";
+          if (messageEl) messageEl.textContent = "Link expirado. Solicite um novo e-mail de confirmação.";
+          return;
+        }
+
+        if (titleEl) titleEl.textContent = "Não foi possível confirmar o e-mail";
+        if (messageEl) messageEl.textContent = "O link de confirmação é inválido ou já foi utilizado. Faça login e solicite um novo e-mail, se necessário.";
+      })();
+    </script>
   </body>
 </html>

@@ -1,7 +1,7 @@
 (function(global) {
   "use strict";
 
-  var DEFAULT_FONT_FAMILY = "'Calibri',sans-serif";
+  var DEFAULT_FONT_FAMILY = "Arial, sans-serif";
   var DEFAULT_FONT_SIZE = "11pt";
   var DEFAULT_COLOR = "#1a1a1a";
   var FONT_SIZE_VALUES = [

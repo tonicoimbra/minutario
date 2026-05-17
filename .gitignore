@@ -16,3 +16,10 @@ minutario-desktop/src/shared/config.js
 # Local extension packages
 dist/
 dist-firefox/
+
+# Webview2 Runtime and temporary files
+minutario-desktop/webview2-fixed/
+temp_dashboard.js
+temp_dashboard.js.tmp
+fix_revert.py
+fix.py

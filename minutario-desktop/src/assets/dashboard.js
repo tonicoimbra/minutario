@@ -171,6 +171,307 @@
     }, 2500);
   }
 
+  // Custom modal dialogs (replaces native prompt/confirm which don't work in Tauri)
+  var _modalOpen = false;
+
+  function forceBlurEditor() {
+    if (quill && typeof quill.blur === "function") {
+      quill.blur();
+    }
+    if (document.activeElement && document.activeElement !== document.body) {
+      document.activeElement.blur();
+    }
+  }
+
+  function createModalFocusLock(overlay, preferredElement, shouldSelectText) {
+    var released = false;
+    var focusInterval = null;
+    var didInitialSelect = false;
+    var suppressRedirect = false;
+
+    function focusPreferred() {
+      if (!preferredElement || !preferredElement.isConnected) return;
+      if (document.activeElement === preferredElement) return;
+      preferredElement.focus();
+      if (shouldSelectText && !didInitialSelect && typeof preferredElement.select === "function") {
+        preferredElement.select();
+        didInitialSelect = true;
+      }
+    }
+
+    function onDocumentKeydown(event) {
+      var targetInOverlay = overlay.contains(event.target) || (event.composedPath && function() {
+        var path = event.composedPath();
+        for (var i = 0; i < path.length; i++) {
+          if (path[i] === overlay) return true;
+        }
+        return false;
+      }());
+      var activeInOverlay = overlay.contains(document.activeElement);
+      if (!targetInOverlay && !activeInOverlay) {
+        event.preventDefault();
+        event.stopPropagation();
+        focusPreferred();
+      }
+    }
+
+    function onDocumentFocusIn(event) {
+      if (suppressRedirect) return;
+      if (!overlay.contains(event.target) && !overlay.contains(document.activeElement)) {
+        event.stopPropagation();
+        focusPreferred();
+      }
+    }
+
+    var editorWasEnabled = false;
+    if (typeof window.quill !== "undefined" && window.quill) {
+      var quill = window.quill;
+      if (typeof quill.isEnabled === "function" && typeof quill.enable === "function") {
+        editorWasEnabled = quill.isEnabled();
+        if (editorWasEnabled) {
+          quill.enable(false);
+        }
+      }
+    }
+
+    document.body.classList.add("modal-open");
+
+    document.addEventListener("focusin", onDocumentFocusIn, true);
+    document.addEventListener("keydown", onDocumentKeydown, true);
+
+    focusInterval = window.setInterval(function() {
+      if (!_modalOpen || !preferredElement || !preferredElement.isConnected) return;
+      if (document.activeElement !== preferredElement && !overlay.contains(document.activeElement)) {
+        focusPreferred();
+      }
+    }, 500);
+
+    focusPreferred();
+
+    return {
+      release: function releaseModalFocusLock() {
+        if (released) return;
+        released = true;
+        if (focusInterval) {
+          window.clearInterval(focusInterval);
+          focusInterval = null;
+        }
+        document.removeEventListener("focusin", onDocumentFocusIn, true);
+        document.removeEventListener("keydown", onDocumentKeydown, true);
+        document.body.classList.remove("modal-open");
+        if (editorWasEnabled && typeof window.quill !== "undefined" && typeof window.quill.enable === "function") {
+          window.quill.enable(true);
+        }
+      },
+      setSuppressRedirect: function(v) { suppressRedirect = !!v; }
+    };
+  }
+
+  function showInputModal(title, defaultValue) {
+    return new Promise(function(resolve) {
+      _modalOpen = true;
+      forceBlurEditor();
+
+      var overlay = document.createElement("div");
+      overlay.className = "modal-overlay";
+
+      var box = document.createElement("div");
+      box.className = "modal-box";
+
+      var heading = document.createElement("h3");
+      heading.className = "modal-title";
+      heading.textContent = title || "";
+
+      var input = document.createElement("input");
+      input.className = "modal-input";
+      input.type = "text";
+      input.value = defaultValue || "";
+
+      var actions = document.createElement("div");
+      actions.className = "modal-actions";
+
+      var cancelBtn = document.createElement("button");
+      cancelBtn.className = "btn btn-secondary";
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancelar";
+
+      var okBtn = document.createElement("button");
+      okBtn.className = "btn btn-primary";
+      okBtn.type = "button";
+      okBtn.textContent = "OK";
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      box.appendChild(heading);
+      box.appendChild(input);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      var focusLock = createModalFocusLock(overlay, input, true);
+
+      var _userClickedInput = false;
+
+      input.addEventListener("mousedown", function(e) {
+        _userClickedInput = true;
+        focusLock.setSuppressRedirect(true);
+        e.stopPropagation();
+        if (document.activeElement !== input) {
+          input.focus();
+        }
+      });
+
+      input.addEventListener("mouseup", function() {
+        if (document.activeElement !== input && input.isConnected) {
+          input.focus();
+        }
+      });
+
+      input.addEventListener("click", function() {
+        if (document.activeElement !== input && input.isConnected) {
+          input.focus();
+        }
+        _userClickedInput = false;
+        window.setTimeout(function() { focusLock.setSuppressRedirect(false); }, 100);
+      });
+
+      // Clicking on non-interactive areas inside the box (heading, padding)
+      // should redirect focus to the input.
+      box.addEventListener("mousedown", function(e) {
+        if (e.target === input || e.target.tagName === "BUTTON") return;
+        e.preventDefault();
+        input.focus();
+      });
+
+      function cleanup(result) {
+        _modalOpen = false;
+        focusLock.release();
+        overlay.remove();
+        resolve(result);
+      }
+
+      okBtn.addEventListener("click", function() {
+        cleanup(input.value);
+      });
+
+      cancelBtn.addEventListener("click", function() {
+        cleanup(null);
+      });
+
+      // Handle Enter/Escape on the input itself (NOT capture phase on overlay)
+      input.addEventListener("keydown", function(e) {
+        e.stopPropagation(); // prevent global handleKeydown from firing
+        if (e.key === "Enter") {
+          e.preventDefault();
+          cleanup(input.value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          cleanup(null);
+        }
+      });
+
+      // Prevent clicks on overlay background from focusing elements behind it
+      overlay.addEventListener("mousedown", function(e) {
+        if (e.target === overlay) {
+          e.preventDefault();
+          cleanup(null);
+        }
+      });
+
+      overlay.addEventListener("click", function(e) {
+        if (e.target === overlay) e.preventDefault();
+      });
+
+      // FIX: Use guarded focus calls to avoid redundant focus() in WebView2,
+      // which silently drops keystrokes when focus is called on an already-
+      // focused element (see focusPreferred guard comment above).
+      window.setTimeout(function() {
+        if (!_modalOpen || !input.isConnected) return;
+        if (document.activeElement !== input) {
+          input.focus();
+        }
+        if (typeof input.select === "function") input.select();
+      }, 50);
+      window.setTimeout(function() {
+        if (!_modalOpen || !input.isConnected) return;
+        if (document.activeElement !== input) {
+          input.focus();
+        }
+      }, 200);
+    });
+  }
+
+  function showConfirmModal(message) {
+    return new Promise(function(resolve) {
+      _modalOpen = true;
+      forceBlurEditor();
+
+      var overlay = document.createElement("div");
+      overlay.className = "modal-overlay";
+
+      var box = document.createElement("div");
+      box.className = "modal-box";
+
+      var msg = document.createElement("p");
+      msg.className = "modal-message";
+      msg.textContent = message || "";
+
+      var actions = document.createElement("div");
+      actions.className = "modal-actions";
+
+      var cancelBtn = document.createElement("button");
+      cancelBtn.className = "btn btn-secondary";
+      cancelBtn.type = "button";
+      cancelBtn.textContent = "Cancelar";
+
+      var okBtn = document.createElement("button");
+      okBtn.className = "btn btn-danger";
+      okBtn.type = "button";
+      okBtn.textContent = "Confirmar";
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      box.appendChild(msg);
+      box.appendChild(actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      var focusLock = createModalFocusLock(overlay, okBtn, false);
+
+      function cleanup(result) {
+        _modalOpen = false;
+        focusLock.release();
+        overlay.remove();
+        resolve(result);
+      }
+
+      okBtn.addEventListener("click", function() {
+        cleanup(true);
+      });
+
+      cancelBtn.addEventListener("click", function() {
+        cleanup(false);
+      });
+
+      // Escape on buttons (bubble phase, NOT capture)
+      okBtn.addEventListener("keydown", function(e) {
+        e.stopPropagation();
+        if (e.key === "Escape") { e.preventDefault(); cleanup(false); }
+      });
+      cancelBtn.addEventListener("keydown", function(e) {
+        e.stopPropagation();
+        if (e.key === "Escape") { e.preventDefault(); cleanup(false); }
+      });
+
+      overlay.addEventListener("mousedown", function(e) {
+        if (e.target === overlay) { e.preventDefault(); cleanup(false); }
+      });
+
+      window.setTimeout(function() {
+        if (!_modalOpen || !okBtn.isConnected) return;
+        if (document.activeElement !== okBtn) okBtn.focus();
+      }, 50);
+    });
+  }
+
   function debugLog(message, details) {
     var config = window.MinutarioConfig || {};
     if (!config.DEBUG_LOGS || !window.console || typeof window.console.log !== "function") {
@@ -736,10 +1037,15 @@ function getUserIdFromUser(user) {
       var loginErrorMessage = authUi.mapSupabaseError
         ? authUi.mapSupabaseError(err, "Erro ao autenticar no Supabase.")
         : (err && err.message ? err.message : "Erro ao autenticar no Supabase.");
-      setFormStatus(els.loginStatus, loginErrorMessage, "error");
       if (authUi.isEmailNotConfirmedError && authUi.isEmailNotConfirmedError(err && err.message ? err.message : "")) {
+        var unconfirmedMessage = authUi.getEmailNotConfirmedMessage
+          ? authUi.getEmailNotConfirmedMessage()
+          : "Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada ou clique aqui para reenviar o e-mail de confirmação.";
+        setFormStatus(els.loginStatus, unconfirmedMessage, "error");
         resendConfirmationEmail = emailData.email;
         showResendConfirmation();
+      } else {
+        setFormStatus(els.loginStatus, loginErrorMessage, "error");
       }
       setSubmitLoading(els.loginButton, false);
       return;
@@ -1594,10 +1900,19 @@ function getUserIdFromUser(user) {
   function handleNewTemplate() {
     currentTemplateId = null;
     if (els.editorForm) els.editorForm.reset();
-    if (quill && quill.setContents) quill.setContents([]);
-    else if (quill && quill.root) quill.root.innerHTML = "";
+    if (quill && quill.setContents) {
+      quill.setContents([]);
+      quill.blur();
+    } else if (quill && quill.root) {
+      quill.root.innerHTML = "";
+    }
     if (els.tplFolder) els.tplFolder.value = activeFolderId || "";
     if (els.deleteTemplateBtn) els.deleteTemplateBtn.style.display = 'none';
+    window.setTimeout(function() {
+      if (els.tplName) {
+        els.tplName.focus();
+      }
+    }, 100);
   }
 
   function loadTemplateIntoEditor(template) {
@@ -1692,7 +2007,8 @@ function getUserIdFromUser(user) {
 
   async function handleDeleteTemplate() {
     if (!currentTemplateId) return;
-    if (!confirm("Tem certeza que deseja excluir este template?")) return;
+    var confirmed = await showConfirmModal("Tem certeza que deseja excluir este template?");
+    if (!confirmed) return;
 
     try {
       if (window.MinutarioDB && window.MinutarioDB.deleteTemplate) {
@@ -1716,7 +2032,7 @@ function getUserIdFromUser(user) {
   }
 
   async function handleNewFolder() {
-    var name = prompt("Nome da pasta:");
+    var name = await showInputModal("Nome da pasta:");
     if (!name) return;
 
     name = name.trim();
@@ -1764,7 +2080,8 @@ function getUserIdFromUser(user) {
       return;
     }
 
-    if (!confirm("Tem certeza que deseja excluir esta pasta?")) return;
+    var folderConfirmed = await showConfirmModal("Tem certeza que deseja excluir esta pasta?");
+    if (!folderConfirmed) return;
 
     try {
       if (window.MinutarioDB && window.MinutarioDB.deleteFolder) {
@@ -1794,7 +2111,7 @@ function getUserIdFromUser(user) {
     var folder = getFolderById(activeFolderId);
     if (!folder) return;
 
-    var nextName = prompt("Novo nome da pasta:", folder.name || "");
+    var nextName = await showInputModal("Novo nome da pasta:", folder.name || "");
     if (!nextName) return;
 
     nextName = nextName.trim();
@@ -1828,6 +2145,9 @@ function getUserIdFromUser(user) {
 
   // Keyboard shortcuts
   function handleKeydown(event) {
+    // Skip all keyboard shortcuts while a modal dialog is open
+    if (_modalOpen) return;
+
     var searchFocused = document.activeElement === els.searchInput;
 
     // Ctrl+1 to Ctrl+9

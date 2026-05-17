@@ -418,10 +418,15 @@ document.addEventListener("DOMContentLoaded", function () {
       showDashboard(user);
     } catch (err) {
       var message = ui.mapSupabaseError ? ui.mapSupabaseError(err, "Erro ao fazer login.") : String(err && err.message ? err.message : "Erro ao fazer login.");
-      safeSetStatus(els.loginStatus, message, "error");
       if (ui.isEmailNotConfirmedError && ui.isEmailNotConfirmedError(err && err.message ? err.message : "")) {
+        var unconfirmedMessage = ui.getEmailNotConfirmedMessage
+          ? ui.getEmailNotConfirmedMessage()
+          : "Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada ou clique aqui para reenviar o e-mail de confirmação.";
+        safeSetStatus(els.loginStatus, unconfirmedMessage, "error");
         resendEmail = emailResult.email;
         showResendWrap();
+      } else {
+        safeSetStatus(els.loginStatus, message, "error");
       }
     } finally {
       setButtonLoading(document.getElementById("login-btn"), false);

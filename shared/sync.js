@@ -346,6 +346,11 @@
       var remoteTemplatesFull = await API.getTemplates(userId);
       var remoteFoldersFull = await API.getFolders(userId);
 
+      // Read pending deletes BEFORE pushing them — we need these IDs to
+      // filter the merge result so deleted items are not re-added locally
+      var pendingTemplateDeleteIds = await readPendingDeletes("template", userId);
+      var pendingFolderDeleteIds = await readPendingDeletes("folder", userId);
+
       debugLog("Starting incremental sync.", {
         userId: userId,
         lastSyncKey: lastSyncKey,
@@ -354,6 +359,8 @@
         localFolderCount: localFolders.length,
         remoteCount: remoteTemplatesFull.length,
         remoteFolderCount: remoteFoldersFull.length,
+        pendingTemplateDeletes: pendingTemplateDeleteIds.length,
+        pendingFolderDeletes: pendingFolderDeleteIds.length,
       });
 
       await pushPendingDeletes(userId);
@@ -363,13 +370,29 @@
       localTemplates = filterTemplatesForUser(await DB.getAllTemplates(), userId);
       localFolders = filterFoldersForUser(DB.getAllFolders ? await DB.getAllFolders() : [], userId);
 
-      var remoteTemplates = options.forceFullPull
+      var shouldFullPullTemplates = options.forceFullPull || !lastSync || localTemplates.length === 0;
+      var shouldFullPullFolders = options.forceFullPull || !lastSync || localFolders.length === 0;
+
+      var remoteTemplates = shouldFullPullTemplates
         ? await API.getTemplates(userId)
         : await API.getTemplates(userId, { since: lastSync });
-      var remoteFolders = await API.getFolders(userId);
+      var remoteFolders = shouldFullPullFolders ? remoteFoldersFull : await API.getFolders(userId);
 
       var merged = mergeTemplates(localTemplates, remoteTemplates);
       var mergedFolders = mergeFolders(localFolders, remoteFolders);
+
+      // Filter out items that were pending deletion — prevents re-insertion
+      // of remotely fetched records whose delete may not have propagated yet
+      if (pendingTemplateDeleteIds.length > 0) {
+        merged = merged.filter(function(t) {
+          return pendingTemplateDeleteIds.indexOf(t.id) === -1;
+        });
+      }
+      if (pendingFolderDeleteIds.length > 0) {
+        mergedFolders = mergedFolders.filter(function(f) {
+          return pendingFolderDeleteIds.indexOf(f.id) === -1;
+        });
+      }
 
       for (var i = 0; i < merged.length; i++) {
         await DB.putTemplate(merged[i]);
@@ -381,6 +404,14 @@
         } else if (DB.saveFolder) {
           await DB.saveFolder(mergedFolders[j]);
         }
+      }
+
+      // Also clean up local DB in case any deleted item was re-introduced
+      for (var di = 0; di < pendingTemplateDeleteIds.length; di++) {
+        try { await DB.deleteTemplate(pendingTemplateDeleteIds[di]); } catch (e) { /* ignore */ }
+      }
+      for (var dj = 0; dj < pendingFolderDeleteIds.length; dj++) {
+        try { await DB.deleteFolder(pendingFolderDeleteIds[dj]); } catch (e) { /* ignore */ }
       }
 
       var now = new Date().toISOString();
@@ -494,9 +525,26 @@
         await prepareUserContext(userId, options.previousUserId);
       }
 
+      // Push pending deletes to Supabase FIRST so they're gone when we pull
+      var pendingTemplateDeleteIds = await readPendingDeletes("template", userId);
+      var pendingFolderDeleteIds = await readPendingDeletes("folder", userId);
+      await pushPendingDeletes(userId);
+
       var lastSyncKey = getLastSyncKey(userId);
       var remoteTemplates = await API.getTemplates(userId);
       var remoteFolders = await API.getFolders(userId);
+
+      // Safety filter: exclude any items whose delete may not have propagated
+      if (pendingTemplateDeleteIds.length > 0) {
+        remoteTemplates = remoteTemplates.filter(function(t) {
+          return pendingTemplateDeleteIds.indexOf(t.id) === -1;
+        });
+      }
+      if (pendingFolderDeleteIds.length > 0) {
+        remoteFolders = remoteFolders.filter(function(f) {
+          return pendingFolderDeleteIds.indexOf(f.id) === -1;
+        });
+      }
 
       debugLog("Starting full sync.", {
         userId: userId,

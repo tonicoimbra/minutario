@@ -200,6 +200,17 @@
       return "Credenciais inválidas.";
     }
 
+    if (isEmailNotConfirmedError(lower)) {
+      return "Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada.";
+    }
+
+    if (
+      lower.indexOf("otp_expired") !== -1 ||
+      lower.indexOf("expired") !== -1
+    ) {
+      return "Link expirado. Solicite um novo e-mail de confirmação.";
+    }
+
     if (
       lower.indexOf("rate limit") !== -1 ||
       lower.indexOf("too many requests") !== -1 ||
@@ -290,5 +301,8 @@
     setFieldError: setFieldError,
     setStatus: setStatus,
     extractIdentifier: extractIdentifier,
+    getEmailNotConfirmedMessage: function () {
+      return "Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada ou clique aqui para reenviar o e-mail de confirmação.";
+    },
   };
 })(typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : this);
