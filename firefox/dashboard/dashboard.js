@@ -916,7 +916,7 @@ function getUserIdFromUser(user) {
     if (range) {
       format = quill.getFormat(range.index, range.length);
     } else {
-      format = quill.getFormat();
+      format = {};
     }
 
     size = normalizeFontSize(format && format.size ? format.size : "");
