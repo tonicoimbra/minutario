@@ -132,9 +132,47 @@
       var client = window.MinutarioAPI.getClient();
       var result = await client.auth.updateUser({ password: newPasswordEl.value });
       if (result.error) throw result.error;
-      setStatus("Senha atualizada com sucesso. Retorne ao login.", "success");
+
+      // Tenta recuperar e salvar a nova sessão na extensão para login automático
+      try {
+        var sessionResult = await client.auth.getSession();
+        var session = sessionResult && sessionResult.data ? sessionResult.data.session : null;
+        if (session && window.MinutarioAPI && window.MinutarioAPI.saveAuthSession) {
+          await window.MinutarioAPI.saveAuthSession(session);
+          var userId = session.user ? session.user.id : null;
+          var extensionApi = typeof browser !== "undefined" ? browser : (typeof chrome !== "undefined" ? chrome : null);
+          if (userId && extensionApi && extensionApi.storage && extensionApi.storage.local) {
+            await extensionApi.storage.local.set({ minutario_user_id: userId });
+          }
+        }
+      } catch (sessionErr) {
+        console.error("Erro ao salvar sessão após reset:", sessionErr);
+      }
+
+      setStatus("Senha atualizada com sucesso.", "success");
       event.target.reset();
       updatePasswordFeedback();
+
+      // Exibe a tela de sucesso e inicia contagem regressiva
+      var resetContainer = document.getElementById("reset-container");
+      var successContainer = document.getElementById("success-container");
+      var countdownEl = document.getElementById("countdown");
+
+      if (resetContainer) resetContainer.style.display = "none";
+      if (successContainer) successContainer.style.display = "block";
+
+      var seconds = 3;
+      if (countdownEl) countdownEl.textContent = String(seconds);
+      var interval = setInterval(function () {
+        seconds -= 1;
+        if (countdownEl) countdownEl.textContent = String(seconds);
+        if (seconds <= 0) {
+          clearInterval(interval);
+          var dashboardUrl = "../dashboard/dashboard.html";
+          window.location.href = dashboardUrl;
+        }
+      }, 1000);
+
     } catch (err) {
       setStatus(
         ui.mapSupabaseError

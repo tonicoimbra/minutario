@@ -1265,11 +1265,28 @@ function getUserIdFromUser(user) {
       var client = window.MinutarioAPI.getClient();
       var result = await client.auth.updateUser({ password: els.resetNewPassword.value });
       if (result.error) throw result.error;
-      setFormStatus(els.resetStatus, "Senha atualizada com sucesso. Faça login novamente.", "success");
-      if (els.resetForm) els.resetForm.reset();
-      updateResetPasswordFeedback();
-      showAuthView("login");
-      setFormStatus(els.loginStatus, "Senha redefinida com sucesso. Faça login.", "success");
+
+      // Recupera e salva a nova sessão no desktop para login automático
+      var sessionResult = await client.auth.getSession();
+      var session = sessionResult && sessionResult.data ? sessionResult.data.session : null;
+      if (session) {
+        await saveTokens(session);
+        await saveUserId(getUserIdFromUser(session.user));
+
+        setFormStatus(els.resetStatus, "Senha atualizada com sucesso. Redirecionando para o Minutário...", "success");
+        if (els.resetForm) els.resetForm.reset();
+        updateResetPasswordFeedback();
+
+        setTimeout(async function () {
+          await initDashboard();
+        }, 2000);
+      } else {
+        setFormStatus(els.resetStatus, "Senha atualizada com sucesso.", "success");
+        if (els.resetForm) els.resetForm.reset();
+        updateResetPasswordFeedback();
+        showAuthView("login");
+        setFormStatus(els.loginStatus, "Senha redefinida com sucesso. Faça login.", "success");
+      }
     } catch (err) {
       var resetMessage = authUi.mapSupabaseError
         ? authUi.mapSupabaseError(err, "Erro ao atualizar senha.")
