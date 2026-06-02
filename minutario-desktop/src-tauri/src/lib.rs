@@ -366,6 +366,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .setup(move |app| {
             let conn = db::sqlite::init_db(app.handle()).expect("failed to init database");
             let conn = Arc::new(Mutex::new(conn));
